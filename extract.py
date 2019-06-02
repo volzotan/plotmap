@@ -12,7 +12,7 @@ from datetime import datetime
 # MAP_UP_LEFT     = (50.9185, 11.4048)
 # MAP_DOWN_RIGHT  = (51.0395, 11.2166)
 
-MAP_CENTER      = (50.9808, 11.3248)
+MAP_CENTER      = (50.980467, 11.325000)
 
 MAP_SIZE        = 1000 # px
 
@@ -108,6 +108,9 @@ class SvgWriter(object):
                 layer = self.layers[layerid]
                 
                 out.write("<g inkscape:groupmode=\"layer\" id=\"{0}\" inkscape:label=\"{0}\">".format(layerid))
+
+                for c in layer["circles"]:
+                    out.write("<circle cx=\"{}\" cy=\"{}\" fill=\"rgb({},{},{})\" r=\"{}\" />".format(c[0][0], c[0][1], c[2][0], c[2][1], c[2][2], c[1]))
 
                 for r in layer["rectangles"]:
                     out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(*r[0], *r[1], r[2], *r[3], r[4]))
@@ -241,7 +244,7 @@ class Converter(object):
 
     #     return (x, y)
 
-bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 1000, 1000)
+bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 1000, 500)
 print(bounding_box)
 
 MAP_UP_LEFT = bounding_box[0]
@@ -262,6 +265,7 @@ print((MAP_UP_LEFT, MAP_DOWN_RIGHT))
 conv = Converter(MAP_UP_LEFT, MAP_DOWN_RIGHT, MAP_SIZE)
 svg = SvgWriter("test.svg", conv.get_map_size())
 
+svg.add_layer("meta")
 svg.add_layer("buildings")
 svg.add_layer("streets")
 svg.add_layer("whatever")
@@ -281,6 +285,10 @@ for node in root.findall("./node"):
     nodes[node.attrib["id"]] = [float(node.attrib["lat"]), float(node.attrib["lon"])]
 
 print("indexed {} nodes".format(len(nodes.keys())))
+
+# --- MISC
+
+svg.add_circles([conv.convert(*MAP_CENTER)], layer="meta")
 
 # --- BUILDINGS
 
