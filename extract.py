@@ -1,4 +1,5 @@
-import xml.etree.ElementTree as ET  
+# import xml.etree.ElementTree as ET  
+import lxml.etree as ET
 
 import sys
 import math
@@ -37,6 +38,7 @@ class SvgWriter(object):
         self.layers[layer_id]["rectangles"] = []
         self.layers[layer_id]["polygons"]   = []
         self.layers[layer_id]["lines"]      = []
+        self.layers[layer_id]["raw"]        = []
 
     def add_hexagons(self, hexagons, fills, layer="default"):
         for i in range(0, len(hexagons)):
@@ -53,11 +55,19 @@ class SvgWriter(object):
     def add_rectangle(self, coords, strokewidth=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
         self.layers[layer]["rectangles"].append([*coords, strokewidth, stroke, opacity])
 
-    def add_polygon(self, coords, strokewidth=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
-        self.layers[layer]["polygons"].append(coords)
+    def add_polygon(self, coords, strokewidth=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default"):
+        options = {}
+        options["strokewidth"]  = strokewidth
+        options["stroke"]       = stroke
+        options["fill"]         = fill
+        options["opacity"]      = opacity
+        self.layers[layer]["polygons"].append((coords, options))
 
     def add_line(self, coords, strokewidth=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
         self.layers[layer]["lines"].append(coords)
+
+    def add_raw_element(self, text, layer="default"):
+        self.layers[layer]["raw"].append(text)
 
     def save(self):
 
@@ -115,7 +125,9 @@ class SvgWriter(object):
                 for r in layer["rectangles"]:
                     out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(*r[0], *r[1], r[2], *r[3], r[4]))
 
-                for p in layer["polygons"]:
+                for poly in layer["polygons"]:
+                    p = poly[0]
+                    options = poly[1]
                     out.write("<path d=\"")
                     out.write("M{} {} ".format(int(p[0][0]), int(p[0][1])))
                     for point in p[1:]:
@@ -125,9 +137,10 @@ class SvgWriter(object):
                         out.write(str(int(point[1])))
                         out.write(" ")
                     out.write("\" ")
-                    out.write("stroke=\"rgb({},{},{})\" ".format(0, 0, 0))
-                    out.write("fill=\"rgb({},{},{})\" ".format(125, 125, 125))
-                    out.write("fill-opacity=\"{}\" />".format(0.5))
+                    out.write("stroke-width=\"{}\" ".format(options["strokewidth"]))
+                    out.write("stroke=\"rgb({},{},{})\" ".format(*options["stroke"]))
+                    out.write("fill=\"rgb({},{},{})\" ".format(*options["fill"]))
+                    out.write("fill-opacity=\"{}\" />".format(options["opacity"]))
 
                 for l in layer["lines"]:
                     out.write("<path d=\"")
@@ -144,6 +157,9 @@ class SvgWriter(object):
                     out.write("fill-opacity=\"{}\" ".format(0))
                     out.write("/>")
 
+                for r in layer["raw"]:
+                    out.write(r)
+
                 out.write("</g>")
 
             out.write("</svg>")
@@ -154,8 +170,6 @@ class SvgWriter(object):
 class Converter(object):
 
     def __init__(self, map_up_left, map_down_right, map_size):
-
-        # self.map_size_virtual = 1000.0 # size of the virtual map
 
         self.north      = map_up_left[0]
         self.south      = map_down_right[0]
@@ -176,22 +190,6 @@ class Converter(object):
 
         self.map_size_x = map_size
         self.map_size_y = map_size * (self.lat_diff_px / self.lon_diff_px) 
-        # self.map_size_y = map_size * (self.lon_diff / self.lat_diff)
-        # self.map_size_y = map_size 
-
-        print(self.map_size_x)
-        print(self.map_size_y)
-
-    # def _mercN(self, lat):
-
-    #     return math.log( math.tan((math.pi / 4.0) + ((lat*math.pi / 180.0) / 2.0)) );
-
-    # def convert_alt(self, lat, lon):
-
-    #     x = ((lon - self.west) / self.lon_diff) * self.map_size_x
-    #     y = ((self._mercN(self.north) - self._mercN(lat)) * self.map_size_y) / (self._mercN(self.north) - self._mercN(self.south))   # somethings wrong
-
-    #     return (x, y)
 
     def _convert_lat(self, lat):
 
@@ -225,42 +223,11 @@ class Converter(object):
     def _m_to_latlon(m):
         return (m / 1.1) * 0.00001
 
-    # https://stackoverflow.com/a/14457180
-    # def convert(lat, lon):
 
-    #     # get x value
-    #     x = (lon+180) * (self.width_px/360.0)
-
-    #     # convert from degrees to radians
-    #     latRad = lat * math.PI / 180.0
-
-    #     # get y value
-    #     mercN = ln(tan((math.PI / 4.0) + (latRad/2.0)));
-
-    #     x = ($x - $west) * $width/($east - $west)
-    #     y = (($ymax - $y) / diff) * $height/($ymax - $ymin)
-
-    #     y     = (self.height_px/2.0) - (self.width_px * mercN / (2.0 * math.PI))
-
-    #     return (x, y)
-
-bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 1000, 500)
-print(bounding_box)
+bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 2000, 1000)
 
 MAP_UP_LEFT = bounding_box[0]
 MAP_DOWN_RIGHT = bounding_box[1]
-
-# MAP_UP_LEFT     = (50.9808, 11.3248)
-# MAP_DOWN_RIGHT  = (50.9790, 11.3271)
-
-# MAP_UP_LEFT     = (50.980192, 11.324840)
-# MAP_DOWN_RIGHT  = (50.979645, 11.327615)
-
-# square
-# MAP_UP_LEFT     = (50.980467, 11.325000)
-# MAP_DOWN_RIGHT  = (50.979248, 11.327623)
-
-print((MAP_UP_LEFT, MAP_DOWN_RIGHT))
 
 conv = Converter(MAP_UP_LEFT, MAP_DOWN_RIGHT, MAP_SIZE)
 svg = SvgWriter("test.svg", conv.get_map_size())
@@ -269,13 +236,10 @@ svg.add_layer("meta")
 svg.add_layer("buildings")
 svg.add_layer("streets")
 svg.add_layer("whatever")
+svg.add_layer("marker")
 
-xy1 = conv.convert(*MAP_UP_LEFT)
-xy2 = conv.convert(*MAP_DOWN_RIGHT)
-svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], strokewidth=2)
-
-#tree = ET.parse("weimar.osm")  
-tree = ET.parse("weimar_theaterplatz.osm")  
+tree = ET.parse("weimar.osm")  
+# tree = ET.parse("weimar_theaterplatz.osm")  
 root = tree.getroot()
 
 # parse document
@@ -290,24 +254,21 @@ print("indexed {} nodes".format(len(nodes.keys())))
 
 svg.add_circles([conv.convert(*MAP_CENTER)], layer="meta")
 
-# --- BUILDINGS
-
-for way in root.findall("./way/tag[@k='building']/.."):
-
-    polygon = []
-
-    for node_id in way.findall("./nd[@ref]"):
-        polygon.append(conv.convert(*nodes[node_id.attrib["ref"]]))
-
-    svg.add_polygon(polygon, layer="buildings")
-
-print("processing buildings finished.")
+xy1 = conv.convert(*MAP_UP_LEFT)
+xy2 = conv.convert(*MAP_DOWN_RIGHT)
+svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], strokewidth=2, layer="meta")
 
 # --- STREETS
 
 for way in root.findall("./way"):
 
-    if len(way.findall("./tag[@k='building']")):
+    if len(way.findall("./tag[@k='building']")) > 0:
+        continue
+
+    if len(way.findall("./tag[@k='building:part']")) > 0:
+        continue
+
+    if len(way.findall("./tag[@k='landuse']")) > 0:
         continue
 
     # print(ET.tostring(way).decode())
@@ -318,10 +279,35 @@ for way in root.findall("./way"):
         way_nodes.append(conv.convert(*nodes[node_id.attrib["ref"]]))
 
     if way_nodes[0] == way_nodes[-1]: # closed loop
-        svg.add_polygon(way_nodes, layer="whatever")
+        svg.add_polygon(way_nodes, layer="whatever", opacity=0.5)
     else:
         svg.add_line(way_nodes, layer="streets")
 
 print("processing streets finished.")
+
+# --- BUILDINGS
+
+for way in root.findall("./way/tag[@k='building']/.."):
+
+    polygon = []
+
+    for node_id in way.findall("./nd[@ref]"):
+        polygon.append(conv.convert(*nodes[node_id.attrib["ref"]]))
+
+    svg.add_polygon(polygon, layer="buildings", fill=[255, 0, 0], opacity=0.5)
+
+print("processing buildings finished.")
+
+
+# --- MARKER
+
+img_tag = "<image xlink:href=\"{}\" x=\"{}\" y=\"{}\" height=\"{}\" width=\"{}\"/>"
+
+viewport_size = conv.get_map_size()
+
+svg.add_raw_element(img_tag.format("marker_1.jpg", 0, 0, 100, 100), layer="marker")
+svg.add_raw_element(img_tag.format("marker_2.jpg", 0, viewport_size[1]-100, 100, 100), layer="marker")
+svg.add_raw_element(img_tag.format("marker_3.jpg", viewport_size[0]-100, 0, 100, 100), layer="marker")
+svg.add_raw_element(img_tag.format("marker_4.jpg", viewport_size[0]-100, viewport_size[1]-100, 100, 100), layer="marker")
 
 svg.save()
