@@ -15,7 +15,7 @@ from datetime import datetime
 
 MAP_CENTER      = (50.980467, 11.325000)
 
-MAP_SIZE        = 1000 # px
+MAP_SIZE        = 250 # units. may be px, may be mm
 
 class SvgWriter(object):
 
@@ -52,19 +52,23 @@ class SvgWriter(object):
             self.layers[layer]["circles"].append([item, radius, fill])
 
     # coords: [[x, y], [width, height]]
-    def add_rectangle(self, coords, strokewidth=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
-        self.layers[layer]["rectangles"].append([*coords, strokewidth, stroke, opacity])
+    def add_rectangle(self, coords, stroke_width=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
+        self.layers[layer]["rectangles"].append([*coords, stroke_width, stroke, opacity])
 
-    def add_polygon(self, coords, strokewidth=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default"):
+    def add_polygon(self, coords, stroke_width=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default"):
         options = {}
-        options["strokewidth"]  = strokewidth
-        options["stroke"]       = stroke
-        options["fill"]         = fill
-        options["opacity"]      = opacity
+        options["stroke-width"]     = stroke_width
+        options["stroke"]           = stroke
+        options["fill"]             = fill
+        options["opacity"]          = opacity
         self.layers[layer]["polygons"].append((coords, options))
 
-    def add_line(self, coords, strokewidth=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
-        self.layers[layer]["lines"].append(coords)
+    def add_line(self, coords, stroke_width=1, stroke=[255, 0, 0], stroke_opacity=1.0, layer="default"):
+        options = {}
+        options["stroke-width"]     = stroke_width
+        options["stroke"]           = stroke
+        options["stroke-opacity"]   = stroke_opacity
+        self.layers[layer]["lines"].append((coords, options))
 
     def add_raw_element(self, text, layer="default"):
         self.layers[layer]["raw"].append(text)
@@ -129,32 +133,36 @@ class SvgWriter(object):
                     p = poly[0]
                     options = poly[1]
                     out.write("<path d=\"")
-                    out.write("M{} {} ".format(int(p[0][0]), int(p[0][1])))
+                    out.write("M{} {} ".format(float(p[0][0]), float(p[0][1])))
                     for point in p[1:]:
                         out.write("L")
-                        out.write(str(int(point[0])))
+                        out.write(str(float(point[0])))
                         out.write(" ")
-                        out.write(str(int(point[1])))
+                        out.write(str(float(point[1])))
                         out.write(" ")
-                    out.write("\" ")
-                    out.write("stroke-width=\"{}\" ".format(options["strokewidth"]))
+                    out.write("Z\" ")
+                    out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))
                     out.write("stroke=\"rgb({},{},{})\" ".format(*options["stroke"]))
                     out.write("fill=\"rgb({},{},{})\" ".format(*options["fill"]))
                     out.write("fill-opacity=\"{}\" />".format(options["opacity"]))
 
-                for l in layer["lines"]:
+                for line in layer["lines"]:
+                    l = line[0]
+                    options = line[1]
                     out.write("<path d=\"")
-                    out.write("M{} {} ".format(int(l[0][0]), int(l[0][1])))
+                    out.write("M{} {} ".format(float(l[0][0]), float(l[0][1])))
                     for point in l[1:]:
                         out.write("L")
-                        out.write(str(int(point[0])))
+                        out.write(str(float(point[0])))
                         out.write(" ")
-                        out.write(str(int(point[1])))
+                        out.write(str(float(point[1])))
                         out.write(" ")
                     out.write("\" ")
-                    out.write("stroke=\"rgb({},{},{})\" ".format(0, 0, 0))
+                    out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))
+                    out.write("stroke=\"rgb({},{},{})\" ".format(*options["stroke"]))
+                    out.write("stroke-opacity=\"{}\" ".format(options["stroke-opacity"]))
                     out.write("fill=\"rgb({},{},{})\" ".format(0, 0, 0))
-                    out.write("fill-opacity=\"{}\" ".format(0))
+                    out.write("fill-opacity=\"{}\" />".format(0))
                     out.write("/>")
 
                 for r in layer["raw"]:
@@ -212,6 +220,38 @@ class Converter(object):
     def get_map_size(self):
         return (self.map_size_x, self.map_size_y)
 
+    def all_elements_inside_boundary(self, coords):
+        for x, y in coords:
+            if x < 0:
+                return False
+            if x > self.map_size_x:
+                return False
+            if y < 0:
+                return False
+            if y > self.map_size_y:
+                return False
+
+        return True
+
+    def all_elements_outside_boundary(self, coords):
+
+        # for lat, lon in coords:
+        #     if lat > self.north:
+        #         return False
+        #     if lat < self.south:
+        #         return False
+        #     if lon < self.west:
+        #         return False
+        #     if lon > self.east:
+        #         return False
+
+        for x, y in coords:
+            if x > 0 and x < self.map_size_x:
+                if y > 0 and y < self.map_size_y:
+                    return False
+
+        return True
+
     @staticmethod
     def get_bounding_box_in_latlon(center_point, width, height):
         map_up_left     = (center_point[0] + Converter._m_to_latlon(height/2), center_point[1] - Converter._m_to_latlon(width/2))
@@ -256,7 +296,7 @@ svg.add_circles([conv.convert(*MAP_CENTER)], layer="meta")
 
 xy1 = conv.convert(*MAP_UP_LEFT)
 xy2 = conv.convert(*MAP_DOWN_RIGHT)
-svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], strokewidth=2, layer="meta")
+svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], stroke_width=0.2, layer="meta")
 
 # --- STREETS
 
@@ -278,10 +318,16 @@ for way in root.findall("./way"):
     for node_id in way.findall("./nd[@ref]"):
         way_nodes.append(conv.convert(*nodes[node_id.attrib["ref"]]))
 
+    if not conv.all_elements_inside_boundary(way_nodes):
+        continue
+
+    # if conv.all_elements_outside_boundary(way_nodes):
+    #     continue
+
     if way_nodes[0] == way_nodes[-1]: # closed loop
-        svg.add_polygon(way_nodes, layer="whatever", opacity=0.5)
+        svg.add_polygon(way_nodes, layer="whatever", stroke_width=0.2, opacity=0.5)
     else:
-        svg.add_line(way_nodes, layer="streets")
+        svg.add_line(way_nodes, stroke_width=0.2, layer="streets")
 
 print("processing streets finished.")
 
@@ -294,7 +340,13 @@ for way in root.findall("./way/tag[@k='building']/.."):
     for node_id in way.findall("./nd[@ref]"):
         polygon.append(conv.convert(*nodes[node_id.attrib["ref"]]))
 
-    svg.add_polygon(polygon, layer="buildings", fill=[255, 0, 0], opacity=0.5)
+    if not conv.all_elements_inside_boundary(polygon):
+        continue
+
+    # if conv.all_elements_outside_boundary(polygon):
+    #     continue
+
+    svg.add_polygon(polygon, layer="buildings", stroke_width=0.2, fill=[255, 0, 0], opacity=0.5)
 
 print("processing buildings finished.")
 
@@ -305,9 +357,11 @@ img_tag = "<image xlink:href=\"{}\" x=\"{}\" y=\"{}\" height=\"{}\" width=\"{}\"
 
 viewport_size = conv.get_map_size()
 
-svg.add_raw_element(img_tag.format("marker_1.jpg", 0, 0, 100, 100), layer="marker")
-svg.add_raw_element(img_tag.format("marker_2.jpg", 0, viewport_size[1]-100, 100, 100), layer="marker")
-svg.add_raw_element(img_tag.format("marker_3.jpg", viewport_size[0]-100, 0, 100, 100), layer="marker")
-svg.add_raw_element(img_tag.format("marker_4.jpg", viewport_size[0]-100, viewport_size[1]-100, 100, 100), layer="marker")
+markersize = 30
+
+svg.add_raw_element(img_tag.format("marker_1.jpg", 0, 0, markersize, markersize), layer="marker")
+svg.add_raw_element(img_tag.format("marker_2.jpg", 0, viewport_size[1]-markersize, markersize, markersize), layer="marker")
+svg.add_raw_element(img_tag.format("marker_3.jpg", viewport_size[0]-markersize, 0, markersize, markersize), layer="marker")
+svg.add_raw_element(img_tag.format("marker_4.jpg", viewport_size[0]-markersize, viewport_size[1]-markersize, markersize, markersize), layer="marker")
 
 svg.save()
