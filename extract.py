@@ -28,6 +28,9 @@ class SvgWriter(object):
         self.dimensions = dimensions
         self.image      = image
 
+        self.hatchings          = {}
+        self.hatching_options   = {}
+
         self.layers     = {}
         self.add_layer("default")
 
@@ -38,6 +41,7 @@ class SvgWriter(object):
         self.layers[layer_id]["rectangles"] = []
         self.layers[layer_id]["polygons"]   = []
         self.layers[layer_id]["lines"]      = []
+        self.layers[layer_id]["poly_lines"] = []
         self.layers[layer_id]["raw"]        = []
 
     def add_hexagons(self, hexagons, fills, layer="default"):
@@ -55,14 +59,7 @@ class SvgWriter(object):
     def add_rectangle(self, coords, stroke_width=1, stroke=[255, 0, 0], opacity=1.0, layer="default"):
         self.layers[layer]["rectangles"].append([*coords, stroke_width, stroke, opacity])
 
-    def add_polygon(self, coords, stroke_width=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default"):
-        options = {}
-        options["stroke-width"]     = stroke_width
-        options["stroke"]           = stroke
-        options["fill"]             = fill
-        options["opacity"]          = opacity
-        self.layers[layer]["polygons"].append((coords, options))
-
+    # coords: [[x1, y1], [x2, x2]]
     def add_line(self, coords, stroke_width=1, stroke=[255, 0, 0], stroke_opacity=1.0, layer="default"):
         options = {}
         options["stroke-width"]     = stroke_width
@@ -70,8 +67,131 @@ class SvgWriter(object):
         options["stroke-opacity"]   = stroke_opacity
         self.layers[layer]["lines"].append((coords, options))
 
+    def add_polygon(self, coords, stroke_width=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default", hatching=None):
+        options = {}
+        options["stroke-width"]     = stroke_width
+        options["stroke"]           = stroke
+        options["fill"]             = fill
+        options["opacity"]          = opacity
+        self.layers[layer]["polygons"].append((coords, options))
+
+        if hatching is not None:
+            self._add_hatching_for_polygon(coords, hatching)
+
+    def add_poly_line(self, coords, stroke_width=1, stroke=[255, 0, 0], stroke_opacity=1.0, layer="default"):
+        options = {}
+        options["stroke-width"]     = stroke_width
+        options["stroke"]           = stroke
+        options["stroke-opacity"]   = stroke_opacity
+        self.layers[layer]["poly_lines"].append((coords, options))
+
     def add_raw_element(self, text, layer="default"):
         self.layers[layer]["raw"].append(text)
+
+    @staticmethod
+    def _line_intersection(line1, line2): 
+
+        A = line1[0]
+        B = line1[1]
+        C = line2[0]
+        D = line2[1]
+
+        Bx_Ax = B[0] - A[0] 
+        By_Ay = B[1] - A[1] 
+        Dx_Cx = D[0] - C[0] 
+        Dy_Cy = D[1] - C[1] 
+        
+        determinant = (-Dx_Cx * By_Ay + Bx_Ax * Dy_Cy) 
+        
+        if abs(determinant) < 1e-20: 
+            return None 
+
+        s = (-By_Ay * (A[0] - C[0]) + Bx_Ax * (A[1] - C[1])) / determinant 
+        t = ( Dx_Cx * (A[1] - C[1]) - Dy_Cy * (A[0] - C[0])) / determinant 
+
+        if s >= 0 and s <= 1 and t >= 0 and t <= 1: 
+            return (A[0] + (t * Bx_Ax), A[1] + (t * By_Ay)) 
+
+        return None
+
+    # rotation: 45-90 degrees
+    # TODO: 0-45 degrees
+    def add_hatching(self, name, rotation=45, distance=2, stroke_width=0.2):
+        self.hatchings[name] = []
+        self.hatching_options[name] = {}
+        self.hatching_options[name]["stroke_width"] = stroke_width
+
+        rot_rad = rotation * math.pi / 180.0
+
+        num_lines = (self.dimensions[0] + self.dimensions[1])/float(distance)
+
+        north = [[0, 0], [self.dimensions[0], 0]]
+        south = [[0, self.dimensions[1]], [self.dimensions[0], self.dimensions[1]]]
+        west  = [[0, 0], [0, self.dimensions[1]]]
+        east  = [[self.dimensions[0], 0], [self.dimensions[0], self.dimensions[1]]]
+
+        for i in range(0, int(num_lines)):
+            y = i * distance
+            x = y * math.tan(rot_rad)
+
+            hatching_line = [[0, y], [x, 0]]
+            cropped_line = []
+
+            north_intersect = SvgWriter._line_intersection(hatching_line, north)
+            south_intersect = SvgWriter._line_intersection(hatching_line, south)
+            west_intersect = SvgWriter._line_intersection(hatching_line, west)
+            east_intersect = SvgWriter._line_intersection(hatching_line, east)
+
+            if west_intersect is not None:
+                cropped_line.append(west_intersect)
+
+            if south_intersect is not None:
+                cropped_line.append(south_intersect)
+
+            if north_intersect is not None:
+                cropped_line.append(north_intersect)
+
+            if east_intersect is not None:
+                cropped_line.append(east_intersect)
+
+            if len(cropped_line) == 2:
+                self.hatchings[name].append(cropped_line)
+                # self.add_line(hatching_line, stroke_width=stroke_width)
+
+    def _polygon_to_lines(self, polygon_coords):
+        lines = []
+        for i in range(0, len(polygon_coords)-1):
+            cur = polygon_coords[i]
+            nxt = polygon_coords[i+1]
+            lines.append([[cur[0], cur[1]], [nxt[0], nxt[1]]])
+
+        return lines
+
+    def _add_hatching_for_polygon(self, coords, hatching_name):
+        lines = self._polygon_to_lines(coords)
+        hatchlines_in_poly = []
+
+        if (len(self.hatchings[hatching_name])) <= 0:
+            raise Exception("missing hatching: {}".format(hatching_name))
+
+        for hline in self.hatchings[hatching_name]:
+            intersection_points = []
+            for line in lines:
+                intersection_point = self._line_intersection(hline, line)
+
+                if intersection_point is not None:
+                    intersection_points.append(intersection_point)
+
+            if len(intersection_points) >= 2:
+                hatchlines_in_poly.append([intersection_points[0], intersection_points[1]])
+            if len(intersection_points) >= 4:
+                hatchlines_in_poly.append([intersection_points[2], intersection_points[3]])
+
+            # TODO ...
+
+        for hip in hatchlines_in_poly:
+            self.add_line(hip, **self.hatching_options[hatching_name])
+
 
     def save(self):
 
@@ -116,8 +236,8 @@ class SvgWriter(object):
 
             for layerid in self.layers.keys():
 
-                if layerid == "default":
-                    continue
+                # if layerid == "default":
+                #     continue
 
                 layer = self.layers[layerid]
                 
@@ -128,6 +248,11 @@ class SvgWriter(object):
 
                 for r in layer["rectangles"]:
                     out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(*r[0], *r[1], r[2], *r[3], r[4]))
+
+                for line in layer["lines"]:
+                    l = line[0]
+                    options = line[1]
+                    out.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-width=\"{}\" stroke=\"rgb(1.0, 1.0, 1.0)\" />".format(*l[0], *l[1], options["stroke-width"]))
 
                 for poly in layer["polygons"]:
                     p = poly[0]
@@ -146,7 +271,7 @@ class SvgWriter(object):
                     out.write("fill=\"rgb({},{},{})\" ".format(*options["fill"]))
                     out.write("fill-opacity=\"{}\" />".format(options["opacity"]))
 
-                for line in layer["lines"]:
+                for line in layer["poly_lines"]:
                     l = line[0]
                     options = line[1]
                     out.write("<path d=\"")
@@ -263,14 +388,32 @@ class Converter(object):
     def _m_to_latlon(m):
         return (m / 1.1) * 0.00001
 
+def area_of_polygon(poly):
 
-bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 2000, 1000)
+    s = 0
+
+    for i in range(0, len(poly)-1):
+        x1 = poly[i][0]
+        y1 = poly[i][1]
+        x2 = poly[i+1][0]
+        y2 = poly[i+1][1]
+        
+        s += x1*y2-y1*x2
+
+    return s/2.0 
+
+
+bounding_box = Converter.get_bounding_box_in_latlon(MAP_CENTER, 1000, 500)
 
 MAP_UP_LEFT = bounding_box[0]
 MAP_DOWN_RIGHT = bounding_box[1]
 
 conv = Converter(MAP_UP_LEFT, MAP_DOWN_RIGHT, MAP_SIZE)
 svg = SvgWriter("test.svg", conv.get_map_size())
+
+svg.add_hatching("default")
+
+# exit()
 
 svg.add_layer("meta")
 svg.add_layer("buildings")
@@ -296,7 +439,8 @@ svg.add_circles([conv.convert(*MAP_CENTER)], layer="meta")
 
 xy1 = conv.convert(*MAP_UP_LEFT)
 xy2 = conv.convert(*MAP_DOWN_RIGHT)
-svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], stroke_width=0.2, layer="meta")
+
+# svg.add_rectangle([xy1, [xy2[0] - xy1[0], xy2[1] - xy1[1]]], stroke_width=0.2, layer="meta")
 
 # --- STREETS
 
@@ -325,14 +469,17 @@ for way in root.findall("./way"):
     #     continue
 
     if way_nodes[0] == way_nodes[-1]: # closed loop
-        svg.add_polygon(way_nodes, layer="whatever", stroke_width=0.2, opacity=0.5)
+        # svg.add_polygon(way_nodes, layer="whatever", stroke_width=0.2, opacity=0.5)
+        pass
     else:
-        svg.add_line(way_nodes, stroke_width=0.2, layer="streets")
+        svg.add_poly_line(way_nodes, stroke_width=0.2, layer="streets")
 
 print("processing streets finished.")
 
 # --- BUILDINGS
 
+added_polygons = 0
+filtered_polygons = 0
 for way in root.findall("./way/tag[@k='building']/.."):
 
     polygon = []
@@ -343,25 +490,32 @@ for way in root.findall("./way/tag[@k='building']/.."):
     if not conv.all_elements_inside_boundary(polygon):
         continue
 
+    if area_of_polygon(polygon) < 0.01:
+        filtered_polygons += 1
+        continue
+
     # if conv.all_elements_outside_boundary(polygon):
     #     continue
 
-    svg.add_polygon(polygon, layer="buildings", stroke_width=0.2, fill=[255, 0, 0], opacity=0.5)
+    added_polygons += 1
+    svg.add_polygon(polygon, layer="buildings", stroke_width=0.2, opacity=0, hatching="default")
 
 print("processing buildings finished.")
-
+print("filtered buildings: {}/{}".format(filtered_polygons, filtered_polygons+added_polygons))
 
 # --- MARKER
 
-img_tag = "<image xlink:href=\"{}\" x=\"{}\" y=\"{}\" height=\"{}\" width=\"{}\"/>"
+# img_tag = "<image xlink:href=\"{}\" x=\"{}\" y=\"{}\" height=\"{}\" width=\"{}\"/>"
 
-viewport_size = conv.get_map_size()
+# viewport_size = conv.get_map_size()
 
-markersize = 30
+# markersize = 30
 
-svg.add_raw_element(img_tag.format("marker_1.jpg", 0, 0, markersize, markersize), layer="marker")
-svg.add_raw_element(img_tag.format("marker_2.jpg", 0, viewport_size[1]-markersize, markersize, markersize), layer="marker")
-svg.add_raw_element(img_tag.format("marker_3.jpg", viewport_size[0]-markersize, 0, markersize, markersize), layer="marker")
-svg.add_raw_element(img_tag.format("marker_4.jpg", viewport_size[0]-markersize, viewport_size[1]-markersize, markersize, markersize), layer="marker")
+# svg.add_raw_element(img_tag.format("marker_1.jpg", 0, 0, markersize, markersize), layer="marker")
+# svg.add_raw_element(img_tag.format("marker_2.jpg", 0, viewport_size[1]-markersize, markersize, markersize), layer="marker")
+# svg.add_raw_element(img_tag.format("marker_3.jpg", viewport_size[0]-markersize, 0, markersize, markersize), layer="marker")
+# svg.add_raw_element(img_tag.format("marker_4.jpg", viewport_size[0]-markersize, viewport_size[1]-markersize, markersize, markersize), layer="marker")
+
+# --- 
 
 svg.save()
