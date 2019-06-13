@@ -1,0 +1,33 @@
+# install postgres
+
+# create an empty DB folder
+
+mkdir postgres_database
+cd postgres_database
+
+# create the db
+
+initdb -D .
+
+# start the DB server 
+
+pg_ctl -D . -l logfile start
+
+# create an user and the tables
+
+createuser --no-superuser --no-createrole --createdb osm
+createdb -E UTF8 --template=template0 -O osm osm # --template=template0 required if ASCII != UNICODE problems arise
+psql -d osm -c "CREATE EXTENSION postgis;"
+psql -d osm -c "CREATE EXTENSION hstore;" # only required for hstore support
+echo "ALTER USER osm WITH PASSWORD 'osm';" |psql -d osm
+
+# read the data to cache
+
+./imposm import -mapping mapping.yml -write -connection postgis://osm:osm@localhost/osm
+
+# write the data from cache to DB
+
+./imposm import -mapping example-mapping.yml -write -connection postgis://osm:osm@localhost/osm
+
+# read: https://imposm.org/docs/imposm3/latest/tutorial.html#preparation
+

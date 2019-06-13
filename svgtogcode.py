@@ -95,7 +95,7 @@ for layer in root.findall("g", root.nsmap):
         all_lines = all_lines + process(child)
 
 
-# all_lines = all_lines[0:1000]
+# all_lines = all_lines[0:3000]
 
 print(" ")
 print("--------------------------------------------------")
@@ -180,6 +180,8 @@ print("optimization done. time: {0:.2f}s".format((datetime.now()-timer).total_se
 # ------------------------------------------------------------------------------------
 # filter tiny edges/leaves/whatever (small lines which are not connected)
 
+nplines = np.array(ordered_lines, dtype=np.float)
+
 distances = np.sqrt(np.add(np.power(np.subtract(nplines[:, 0], nplines[:, 2]), 2), np.power(np.subtract(nplines[:, 1], nplines[:, 3]), 2)))
 indices_shortlines = np.where(distances < MIN_LINE_LENGTH)[0]
 
@@ -189,12 +191,12 @@ for i in range(1, nplines.shape[0]-1):
     cur = nplines[i  , :]
     nxt = nplines[i+1, :]
 
-    if prv[2] == cur[0] and prv[3] == cur[1]:
-        if cur[2] == nxt[0] and cur[3] == nxt[1]:
-            if i in indices_shortlines:
-                unconnected_indices.append(i)
+    if not prv[2] == cur[0] or not prv[3] == cur[1] or not cur[2] == nxt[0] or not cur[3] == nxt[1]:
+        if i in indices_shortlines:
+            unconnected_indices.append(i)
 
 nplines = np.delete(nplines, unconnected_indices, axis=0)
+ordered_lines = nplines
 
 print("cleaned unconnected short lines: {0} | short line ratio: {1:.2f}%".format(len(unconnected_indices), (len(unconnected_indices)/len(all_lines))*100))
 
