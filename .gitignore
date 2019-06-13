@@ -1,4 +1,8 @@
 database/postgres_database
+database/logfile
+database/imposm
+*.pbf
+*.osm
 test.svg
 *.gcode
 *.jpg
