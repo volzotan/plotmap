@@ -270,6 +270,7 @@ curs.execute("""
     SELECT type, geometry FROM {0}.{1}landusages 
     WHERE type IN ({2})
     AND {0}.{1}landusages.geometry && ST_MakeEnvelope({3}, {4}, {5}, {6}, 3857)
+    ORDER BY area DESC
 """.format(DB_NAME, DB_PREFIX, list_to_pg_str(filter_list), *conv.get_bounding_box()))
 print(TIMER_STRING.format("querying landusage data", (datetime.now()-timer_start).total_seconds()))
 
@@ -279,8 +280,26 @@ for item in results:
     landusage = loads(item[1], hex=True)
     landusages.append(landusage)
 
-
 print("{:<50s}: {}".format("landusages", len(landusages)))
+
+# remove contain-duplicates from landusage
+
+indices = []
+for i in range(0, len(landusages)):
+    land_prep = prep(landusages[i])
+    for j in range(i+1, len(landusages)):
+        land_comp = landusages[j]
+
+        if j in indices:
+            continue
+
+        if land_prep.contains(land_comp):
+            indices.append(j)
+
+for i in sorted(indices, reverse=True):
+    del landusages[i]   
+
+print("{:<50s}: {}/{}".format("filtered landusage duplicates", len(indices), len(indices)+len(landusages)))
 print(TIMER_STRING.format("reading landusage data", (datetime.now()-timer_start).total_seconds()))
 
 # ---
@@ -309,10 +328,10 @@ timer_start = datetime.now()
 # generate road polygons from lines
 
 for i in range(0, len(roads_large)):
-    roads_large[i] = roads_large[i].buffer(6)
+    roads_large[i] = roads_large[i].buffer(8)
 
 for i in range(0, len(roads_medium)):
-    roads_medium[i] = roads_medium[i].buffer(3)
+    roads_medium[i] = roads_medium[i].buffer(4)
 
 for i in range(0, len(roads_small)):
     roads_small[i] = roads_small[i].buffer(5)
@@ -393,11 +412,13 @@ for building in buildings_large:
 print("{:<50s}: {}".format("added buildings", len(buildings_small) + len(buildings_large)))
 
 # for road in roads_small:
-#     svg.add_polygon(shapely_polygon_to_list(road), stroke_width=0.2, fill=[255, 0, 0], opacity=0.5, layer="roads")
+#     svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
 for road in roads_medium:
-    svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
+    # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
+    for line in create_hatching(road, distance=0.5):
+        svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 for road in roads_large:
-    svg.add_polygon(shapely_polygon_to_list(road), stroke_width=0, opacity=0, layer="roads")
+    # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=0, opacity=0, layer="roads")
     for line in create_hatching(road, distance=0.5):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 
