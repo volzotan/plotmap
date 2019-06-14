@@ -255,10 +255,15 @@ filter_list = [
     "grass", 
     "scrub", 
     "village_green", 
+    "nature_reserve",
     "orchard", 
     "cemetery",
     "farmland",
-
+    "allotments",
+    "recreation_ground",
+    "sports_centre",
+    "wetland",
+    "stadium"
 ] # residential
 timer_start = datetime.now()
 curs.execute("""
