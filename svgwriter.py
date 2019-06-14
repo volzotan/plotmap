@@ -51,6 +51,10 @@ class SvgWriter(object):
         options["stroke-opacity"]   = stroke_opacity
         self.layers[layer]["lines"].append((coords, options))
 
+    def add_lines(self, coords, **kwargs):
+        for coord in coords:
+            self.add_line(coord, **kwargs)
+
     def add_polygon(self, coords, stroke_width=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default", hatching=None):
         options = {}
         options["stroke-width"]     = stroke_width
