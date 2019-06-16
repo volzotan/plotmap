@@ -19,12 +19,9 @@ TIMER_STRING = "{:<50s}: {:2.2f}s"
 BUILDING_AREA_THRESHOLD_FILTER  = 10.0
 BUILDING_AREA_THRESHOLD_SMALL   = 1500.0 
 
-MAP_CENTER      = [50.980467, 11.325000]
- # unit for data: m / unit for SVG elements: px or mm
-# MAP_SIZE        = [297, 210]
-MAP_SIZE        = [297, 420]
-# increase or decrease MAP_SIZE by factor
-MAP_SIZE_SCALE  = 10.0 
+MAP_CENTER      = [50.979858, 11.325714]
+MAP_SIZE        = [210-10, 297-10]          # unit for data: m / unit for SVG elements: px or mm
+MAP_SIZE_SCALE  = 8.0                       # increase or decrease MAP_SIZE by factor
 
 PEN_WIDTH = 0.25
 
@@ -125,8 +122,119 @@ def list_to_pg_str(l):
 
     return ret
 
-def create_hatching(poly, distance=2.0):
+# removes all contained-in duplicate polygons 
+# modifies passed list and returns number of removed elements
+def remove_duplicates(layer):
+
+    indices = []
+    for i in range(0, len(layer)):
+        obj_prep = prep(layer[i])
+        for j in range(i+1, len(layer)):
+            obj_comp = layer[j]
+
+            if j in indices:
+                continue
+
+            if obj_prep.contains(obj_comp):
+                indices.append(j)
+
+    for i in sorted(indices, reverse=True):
+        del layer[i]   
+
+    return len(indices)
+
+def subtract_layer_from_layer(lower_layer, upper_layer):
+    lower_layer_copy = lower_layer.copy()
+    result = []
+
+    for i in range(0, len(upper_layer)):
+        cutter = upper_layer[i]
+        append_list = []
+        cutter_prepared = prep(cutter)
+
+        for low_layer_object in lower_layer_copy:
+            if cutter_prepared.intersects(low_layer_object):
+                zonk = low_layer_object.difference(cutter)
+                if not zonk.is_empty:
+                    append_list.append(zonk)
+                    lower_layer_copy.remove(low_layer_object)
+
+        for low_layer_object in result:
+            if cutter_prepared.intersects(low_layer_object):
+                zonk = low_layer_object.difference(cutter)
+                if not zonk.is_empty:
+                    append_list.append(zonk)
+                    result.remove(low_layer_object)
+
+        for item in append_list:
+            if type(item) is MultiPolygon:
+                for poly in list(item.geoms):
+                    result.append(poly)
+            else:
+                result.append(item)
+
+    return result
+
+def clip_layer_by_box(layer, box):
+
+    minx = box[0]
+    miny = box[1]
+    maxx = box[2]
+    maxy = box[3]
+
+    box = Polygon([
+        [minx, miny], 
+        [maxx, miny], 
+        [maxx, maxy], 
+        [minx, maxy]
+    ])
+
+    clipped = []
+
+    for i in range(0, len(layer)):
+
+        zonk = box.intersection(layer[i])
+
+        if zonk.is_empty:
+            continue
+
+        if type(zonk) is MultiPolygon or type(zonk) is GeometryCollection:
+            for poly in list(zonk.geoms):
+
+                if not type(poly) is Polygon:
+                    continue
+
+                x, y = poly.exterior.coords.xy
+
+                if min(x) < minx:
+                    continue
+
+                if max(x) > maxx: 
+                    continue
+                    
+                if min(y) < miny:
+                    continue
+            
+                if max(y) > maxy:
+                    continue
+
+                clipped.append(poly)
+        else:
+            clipped.append(zonk)
+
+    return clipped
+
+
+def create_hatching(poly, distance=2.0, connect=False):
     bounds = poly.bounds
+
+    # align the hatching lines on a common grid
+    bounds = [
+        bounds[0]-bounds[0]%distance,
+        bounds[1]-bounds[1]%distance,
+        bounds[2]-bounds[2]%distance,
+        bounds[3]-bounds[3]%distance
+    ]
 
     hatching_lines = []
     num_lines = (bounds[2]-bounds[0]+bounds[3]-bounds[1]) / distance
@@ -155,6 +263,31 @@ def create_hatching(poly, distance=2.0):
         else:
             print("unknown Geometry: {}".format(line))
 
+    if connect:
+        connection_lines = []
+
+        max_length = distance * 2
+
+        flip = False
+
+        for i in range(0, len(hatching_lines)-1):
+            curr_x, curr_y = hatching_lines[i].coords.xy
+            next_x, next_y = hatching_lines[i+1].coords.xy
+
+            conn = None
+
+            if not flip:
+                conn = LineString([[curr_x[1], curr_y[1]], [next_x[1], next_y[1]]])
+            else:
+                conn = LineString([[curr_x[0], curr_y[0]], [next_x[0], next_y[0]]])
+
+            flip = not flip
+
+            if conn.length < max_length:
+                connection_lines.append(conn)
+
+        hatching_lines = hatching_lines + connection_lines
+
     return hatching_lines
 
 timer_total = datetime.now()
@@ -176,6 +309,7 @@ waterareas      = []
 roads_large     = []
 roads_medium    = []
 roads_small     = []
+roads_railway   = []
 buildings_large = []
 buildings_small = []
 
@@ -230,17 +364,22 @@ for item in results:
     roadgeometry = loads(item[1], hex=True)
     roadtype = item[0]
 
-    if roadtype in ["residential"]: 
+    if roadtype in ["railway"]: 
+        roads_railway.append(roadgeometry)
+        continue
+
+    if roadtype in ["residential", "unclassified", "road", "bridleway"]: 
         roads_medium.append(roadgeometry)
         continue
 
-    if roadtype in ["tertiary", "secondary", "primary"]: 
+    if roadtype in ["motorway", "motorway_link", "tertiary", "tertiary_link", "secondary", "secondary_link", "primary", "primary_link", "trunk"]: 
         roads_large.append(roadgeometry)
         continue
 
     roads_small.append(roadgeometry)
 
-num_all_roads = len(roads_large) + len(roads_medium) + len(roads_small)
+num_all_roads = len(roads_large) + len(roads_medium) + len(roads_small) + len(roads_railway)
+print("{:<50s}: {:5}/{} | {:3.2f}%".format("railway roads", len(roads_railway), num_all_roads, len(roads_railway)/num_all_roads*100.0))
 print("{:<50s}: {:5}/{} | {:3.2f}%".format("small roads", len(roads_small), num_all_roads, len(roads_small)/num_all_roads*100.0))
 print("{:<50s}: {:5}/{} | {:3.2f}%".format("medium roads", len(roads_medium), num_all_roads, len(roads_medium)/num_all_roads*100.0))
 print("{:<50s}: {:5}/{} | {:3.2f}%".format("large roads", len(roads_large), num_all_roads, len(roads_large)/num_all_roads*100.0))
@@ -263,8 +402,11 @@ filter_list = [
     "recreation_ground",
     "sports_centre",
     "wetland",
-    "stadium"
-] # residential
+    "stadium",
+    "common",
+    # "parking",
+    "footway",
+]
 timer_start = datetime.now()
 curs.execute("""
     SELECT type, geometry FROM {0}.{1}landusages 
@@ -283,23 +425,9 @@ for item in results:
 print("{:<50s}: {}".format("landusages", len(landusages)))
 
 # remove contain-duplicates from landusage
+number_removed = remove_duplicates(landusages)
 
-indices = []
-for i in range(0, len(landusages)):
-    land_prep = prep(landusages[i])
-    for j in range(i+1, len(landusages)):
-        land_comp = landusages[j]
-
-        if j in indices:
-            continue
-
-        if land_prep.contains(land_comp):
-            indices.append(j)
-
-for i in sorted(indices, reverse=True):
-    del landusages[i]   
-
-print("{:<50s}: {}/{}".format("filtered landusage duplicates", len(indices), len(indices)+len(landusages)))
+print("{:<50s}: {}/{}".format("filtered landusage duplicates", number_removed, number_removed+len(landusages)))
 print(TIMER_STRING.format("reading landusage data", (datetime.now()-timer_start).total_seconds()))
 
 # ---
@@ -328,46 +456,23 @@ timer_start = datetime.now()
 # generate road polygons from lines
 
 for i in range(0, len(roads_large)):
-    roads_large[i] = roads_large[i].buffer(8)
+    roads_large[i] = roads_large[i].buffer(8, 
+        cap_style=shapely.geometry.CAP_STYLE.round, 
+        join_style=shapely.geometry.JOIN_STYLE.round)
 
 for i in range(0, len(roads_medium)):
-    roads_medium[i] = roads_medium[i].buffer(4)
+    roads_medium[i] = roads_medium[i].buffer(4, 
+        cap_style=shapely.geometry.CAP_STYLE.round, 
+        join_style=shapely.geometry.JOIN_STYLE.bevel)
 
 for i in range(0, len(roads_small)):
     roads_small[i] = roads_small[i].buffer(5)
 
 # cut out landusage
 
-landusages_copy = landusages.copy()
-landusages_result = []
-
-for i in range(0, len(roads_small)):
-    road = roads_small[i]
-    append_list = []
-    road_prepared = prep(road)
-
-    for land in landusages_copy:
-        if road_prepared.intersects(land):
-            zonk = land.difference(road)
-            if not zonk.is_empty:
-                append_list.append(zonk)
-                landusages_copy.remove(land)
-
-    for land in landusages_result:
-        if road_prepared.intersects(land):
-            zonk = land.difference(road)
-            if not zonk.is_empty:
-                append_list.append(zonk)
-                landusages_result.remove(land)
-
-    for item in append_list:
-        if type(item) is MultiPolygon:
-            for poly in list(item.geoms):
-                landusages_result.append(poly)
-        else:
-            landusages_result.append(item)
-
-landusages = landusages_result
+landusages = subtract_layer_from_layer(landusages, roads_small)
+number_removed = remove_duplicates(landusages)
+print("{:<50s}: {}/{}".format("removed duplicates after cutting", number_removed, number_removed+len(landusages)))
 
 print(TIMER_STRING.format("performing operations", (datetime.now()-timer_start).total_seconds()))
 
@@ -381,6 +486,8 @@ for i in range(0, len(buildings_large)):
 print(TIMER_STRING.format("transforming building data", (datetime.now()-timer_start).total_seconds()))    
 
 timer_start = datetime.now()
+for i in range(0, len(roads_railway)):
+    roads_railway[i] = ops.transform(conv.convert_list, roads_railway[i])
 for i in range(0, len(roads_small)):
     roads_small[i] = ops.transform(conv.convert_list, roads_small[i])
 for i in range(0, len(roads_medium)):
@@ -399,6 +506,25 @@ for i in range(0, len(waterareas)):
     waterareas[i] = ops.transform(conv.convert_list, waterareas[i])
 print(TIMER_STRING.format("transforming waterarea data", (datetime.now()-timer_start).total_seconds()))    
 
+# --- CLIPPING
+
+timer_start = datetime.now()
+
+print(len(landusages))
+
+bbox = [0, 0, MAP_SIZE[0], MAP_SIZE[1]]
+buildings_small = clip_layer_by_box(buildings_small, bbox)
+buildings_large = clip_layer_by_box(buildings_large, bbox)
+roads_railway = clip_layer_by_box(roads_railway, bbox)
+roads_medium = clip_layer_by_box(roads_medium, bbox)
+roads_large = clip_layer_by_box(roads_large, bbox)
+landusages = clip_layer_by_box(landusages, bbox)
+waterareas = clip_layer_by_box(waterareas, bbox)
+
+print(len(landusages))
+
+print(TIMER_STRING.format("clipping objects", (datetime.now()-timer_start).total_seconds()))   
+
 # --- ADDING
 
 timer_start = datetime.now()
@@ -411,15 +537,17 @@ for building in buildings_large:
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH)
 print("{:<50s}: {}".format("added buildings", len(buildings_small) + len(buildings_large)))
 
+for road in roads_railway:
+    svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0.5, layer="roads")
 # for road in roads_small:
 #     svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
 for road in roads_medium:
     # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
-    for line in create_hatching(road, distance=0.5):
+    for line in create_hatching(road, distance=0.5, connect=True):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 for road in roads_large:
     # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=0, opacity=0, layer="roads")
-    for line in create_hatching(road, distance=0.5):
+    for line in create_hatching(road, distance=0.5, connect=True):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 
 for landusage in landusages:
@@ -431,7 +559,7 @@ for landusage in landusages:
 for waterarea in waterareas:
     # svg.add_polygon(shapely_linestring_to_list(landusage), stroke_width=0.2, opacity=1.0, layer="landusages")
     # svg.add_polygon(shapely_polygon_to_list(waterarea), stroke_width=0.2, opacity=1.0, layer="waterareas")
-    for line in create_hatching(waterarea, distance=0.5):
+    for line in create_hatching(waterarea, distance=0.5, connect=True):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="waterareas")
 
 print(TIMER_STRING.format("added data to svgwriter", (datetime.now()-timer_start).total_seconds()))
