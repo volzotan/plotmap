@@ -81,7 +81,7 @@ class Converter(object):
 
         return mapxs, mapys 
 
-class color:
+class Color(object):
     PURPLE = '\033[95m'
     CYAN = '\033[96m'
     DARKCYAN = '\033[36m'
@@ -92,6 +92,100 @@ class color:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
     END = '\033[0m'
+
+
+class Hatching(object):
+
+    LEFT_TO_RIGHT   = 0x1 << 1
+    RIGHT_TO_LEFT   = 0x1 << 2
+    VERTICAL        = 0x1 << 3 
+    HORIZONTAL      = 0x1 << 4
+
+    @staticmethod
+    def create_hatching(poly, distance=2.0, connect=False, hatching_type=RIGHT_TO_LEFT):
+        bounds = poly.bounds
+
+        # align the hatching lines on a common grid
+        bounds = [
+            bounds[0]-bounds[0]%distance,
+            bounds[1]-bounds[1]%distance,
+            bounds[2]-bounds[2]%distance + distance,
+            bounds[3]-bounds[3]%distance + distance
+        ]
+
+        hatching_lines = []
+        num_lines = 0 
+
+        if hatching_type == Hatching.LEFT_TO_RIGHT or hatching_type == Hatching.RIGHT_TO_LEFT:
+            num_lines = (bounds[2]-bounds[0]+bounds[3]-bounds[1]) / distance
+
+        if hatching_type == Hatching.VERTICAL:
+            num_lines = bounds[2]-bounds[0] / distance
+
+        if hatching_type == Hatching.HORIZONTAL:
+            num_lines = bounds[3]-bounds[1] / distance
+
+        for i in range(0, int(num_lines)):
+            
+            line = None
+
+            if hatching_type == Hatching.LEFT_TO_RIGHT:
+                line = LineString([[bounds[0], bounds[1] + i*distance], [bounds[0] + i*distance, bounds[1]]])
+            elif hatching_type == Hatching.RIGHT_TO_LEFT:
+                line = LineString([[bounds[2], bounds[1] + i*distance], [bounds[2] - i*distance, bounds[1]]])
+            elif hatching_type == Hatching.VERTICAL:
+                line = LineString([[bounds[0] + i*distance, bounds[1]], [bounds[0] + i*distance, bounds[3]]])
+            elif hatching_type == Hatching.HORIZONTAL:
+                line = LineString([[bounds[0], bounds[1] + i*distance], [bounds[2], bounds[1] + i*distance]])
+
+            line = poly.intersection(line)
+
+            if line.length == 0:
+                continue
+
+            if line.is_empty:
+                continue
+
+            if type(line) is MultiLineString:
+                hatching_lines = hatching_lines + list(line.geoms)
+            elif type(line) is LineString:
+                hatching_lines.append(line)
+            elif type(line) is GeometryCollection:       
+                # probably Point and LineString
+                for geom in line.geoms:
+                    if geom.length == 0:
+                        continue
+
+                    hatching_lines.append(geom)
+            else:
+                print("unknown Geometry: {}".format(line))
+
+        if connect:
+            connection_lines = []
+
+            max_length = distance * 2
+
+            flip = False
+
+            for i in range(0, len(hatching_lines)-1):
+                curr_x, curr_y = hatching_lines[i].coords.xy
+                next_x, next_y = hatching_lines[i+1].coords.xy
+
+                conn = None
+
+                if not flip:
+                    conn = LineString([[curr_x[1], curr_y[1]], [next_x[1], next_y[1]]])
+                else:
+                    conn = LineString([[curr_x[0], curr_y[0]], [next_x[0], next_y[0]]])
+
+                flip = not flip
+
+                if conn.length < max_length:
+                    connection_lines.append(conn)
+
+            hatching_lines = hatching_lines + connection_lines
+
+        return hatching_lines
 
 def shapely_polygon_to_list(poly):
     x, y = poly.exterior.coords.xy
@@ -143,12 +237,16 @@ def remove_duplicates(layer):
 
     return len(indices)
 
-def subtract_layer_from_layer(lower_layer, upper_layer):
+def subtract_layer_from_layer(lower_layer, upper_layer, grow=0):
     lower_layer_copy = lower_layer.copy()
     result = []
 
     for i in range(0, len(upper_layer)):
         cutter = upper_layer[i]
+
+        if grow > 0:
+            cutter = cutter.buffer(grow)
+
         append_list = []
         cutter_prepared = prep(cutter)
 
@@ -224,71 +322,6 @@ def clip_layer_by_box(layer, box):
 
     return clipped
 
-
-def create_hatching(poly, distance=2.0, connect=False):
-    bounds = poly.bounds
-
-    # align the hatching lines on a common grid
-    bounds = [
-        bounds[0]-bounds[0]%distance,
-        bounds[1]-bounds[1]%distance,
-        bounds[2]-bounds[2]%distance,
-        bounds[3]-bounds[3]%distance
-    ]
-
-    hatching_lines = []
-    num_lines = (bounds[2]-bounds[0]+bounds[3]-bounds[1]) / distance
-
-    for i in range(0, int(num_lines)):
-        line = LineString([[bounds[0], bounds[1] + i*distance], [bounds[0] + i*distance, bounds[1]]])
-        line = poly.intersection(line)
-
-        if line.length == 0:
-            continue
-
-        if line.is_empty:
-            continue
-
-        if type(line) is MultiLineString:
-            hatching_lines = hatching_lines + list(line.geoms)
-        elif type(line) is LineString:
-            hatching_lines.append(line)
-        elif type(line) is GeometryCollection:       
-            # probably Point and LineString
-            for geom in line.geoms:
-                if geom.length == 0:
-                    continue
-
-                hatching_lines.append(geom)
-        else:
-            print("unknown Geometry: {}".format(line))
-
-    if connect:
-        connection_lines = []
-
-        max_length = distance * 2
-
-        flip = False
-
-        for i in range(0, len(hatching_lines)-1):
-            curr_x, curr_y = hatching_lines[i].coords.xy
-            next_x, next_y = hatching_lines[i+1].coords.xy
-
-            conn = None
-
-            if not flip:
-                conn = LineString([[curr_x[1], curr_y[1]], [next_x[1], next_y[1]]])
-            else:
-                conn = LineString([[curr_x[0], curr_y[0]], [next_x[0], next_y[0]]])
-
-            flip = not flip
-
-            if conn.length < max_length:
-                connection_lines.append(conn)
-
-        hatching_lines = hatching_lines + connection_lines
-
-    return hatching_lines
 
 timer_total = datetime.now()
 
@@ -470,7 +503,10 @@ for i in range(0, len(roads_small)):
 
 # cut out landusage
 
-landusages = subtract_layer_from_layer(landusages, roads_small)
+landusages = subtract_layer_from_layer(landusages, roads_small)#, grow=1)
+# landusages = subtract_layer_from_layer(landusages, buildings_small, grow=1)
+# landusages = subtract_layer_from_layer(landusages, buildings_large, grow=2) # TODO: bug? nearly no landusage polygons left...
+
 number_removed = remove_duplicates(landusages)
 print("{:<50s}: {}/{}".format("removed duplicates after cutting", number_removed, number_removed+len(landusages)))
 
@@ -510,8 +546,6 @@ print(TIMER_STRING.format("transforming waterarea data", (datetime.now()-timer_s
 
 timer_start = datetime.now()
 
-print(len(landusages))
-
 bbox = [0, 0, MAP_SIZE[0], MAP_SIZE[1]]
 buildings_small = clip_layer_by_box(buildings_small, bbox)
 buildings_large = clip_layer_by_box(buildings_large, bbox)
@@ -520,8 +554,6 @@ roads_medium = clip_layer_by_box(roads_medium, bbox)
 roads_large = clip_layer_by_box(roads_large, bbox)
 landusages = clip_layer_by_box(landusages, bbox)
 waterareas = clip_layer_by_box(waterareas, bbox)
-
-print(len(landusages))
 
 print(TIMER_STRING.format("clipping objects", (datetime.now()-timer_start).total_seconds()))   
 
@@ -533,7 +565,7 @@ for building in buildings_small:
     svg.add_polygon(shapely_polygon_to_list(building), stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
 for building in buildings_large:
     svg.add_polygon(shapely_polygon_to_list(building), stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
-    for line in create_hatching(building):
+    for line in Hatching.create_hatching(building): #, hatching_type=Hatching.VERTICAL):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH)
 print("{:<50s}: {}".format("added buildings", len(buildings_small) + len(buildings_large)))
 
@@ -543,23 +575,27 @@ for road in roads_railway:
 #     svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
 for road in roads_medium:
     # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
-    for line in create_hatching(road, distance=0.5, connect=True):
+    for line in Hatching.create_hatching(road, distance=0.5, connect=True):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 for road in roads_large:
     # svg.add_polygon(shapely_polygon_to_list(road), stroke_width=0, opacity=0, layer="roads")
-    for line in create_hatching(road, distance=0.5, connect=True):
+    for line in Hatching.create_hatching(road, distance=0.5, connect=True):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="roads")
 
 for landusage in landusages:
     # svg.add_polygon(shapely_linestring_to_list(landusage), stroke_width=0.2, opacity=1.0, layer="landusages")
     # svg.add_polygon(shapely_polygon_to_list(landusage), stroke_width=0.2, opacity=1.0, layer="landusages")
-    for line in create_hatching(landusage, distance=1.0):
+    for line in Hatching.create_hatching(landusage, distance=1.0):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="landusages")
 
 for waterarea in waterareas:
     # svg.add_polygon(shapely_linestring_to_list(landusage), stroke_width=0.2, opacity=1.0, layer="landusages")
     # svg.add_polygon(shapely_polygon_to_list(waterarea), stroke_width=0.2, opacity=1.0, layer="waterareas")
-    for line in create_hatching(waterarea, distance=0.5, connect=True):
+
+    hatch1 = Hatching.create_hatching(waterarea, distance=1.0, connect=True, hatching_type=Hatching.LEFT_TO_RIGHT)
+    hatch2 = Hatching.create_hatching(waterarea, distance=1.0, connect=True, hatching_type=Hatching.RIGHT_TO_LEFT)
+
+    for line in hatch1 + hatch2:
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH, layer="waterareas")
 
 print(TIMER_STRING.format("added data to svgwriter", (datetime.now()-timer_start).total_seconds()))
@@ -571,4 +607,4 @@ svg.save()
 curs.close()
 conn.close()
 
-print(TIMER_STRING.format(color.BOLD + "time total" + color.END, (datetime.now()-timer_total).total_seconds()))
+print(TIMER_STRING.format(Color.BOLD + "time total" + Color.END, (datetime.now()-timer_total).total_seconds()))
