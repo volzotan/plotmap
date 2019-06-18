@@ -188,13 +188,26 @@ class Hatching(object):
         return hatching_lines
 
 def shapely_polygon_to_list(poly):
+    result_list = []
+
     x, y = poly.exterior.coords.xy
 
-    coords = []
+    coords_outer = []
     for i in range(0, len(x)):
-        coords.append([x[i], y[i]])
+        coords_outer.append([x[i], y[i]])
 
-    return coords
+    result_list.append(coords_outer)
+
+    holes = list(poly.interiors)
+    for ring in holes:
+        xr, yr = ring.coords.xy
+        ring_coords = []
+        if xr is not None and yr is not None:
+            for i in range(0, len(xr)):
+                ring_coords.append([xr[i], yr[i]])
+        result_list.append(ring_coords)
+
+    return result_list
 
 def shapely_linestring_to_list(linestring):
     x, y = linestring.coords.xy
@@ -562,15 +575,25 @@ print(TIMER_STRING.format("clipping objects", (datetime.now()-timer_start).total
 timer_start = datetime.now()
 
 for building in buildings_small:
-    svg.add_polygon(shapely_polygon_to_list(building), stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
+    for poly in shapely_polygon_to_list(building):
+        svg.add_polygon(poly, stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
+
 for building in buildings_large:
-    svg.add_polygon(shapely_polygon_to_list(building), stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
+
+    polys = shapely_polygon_to_list(building)
+
+    for poly in polys: 
+        svg.add_polygon(poly, stroke_width=PEN_WIDTH, opacity=0, layer="buildings")
+    
+    # if multiple polygons (i.e. poly with holes) only first (outer) polygon should be hatched
     for line in Hatching.create_hatching(building): #, hatching_type=Hatching.VERTICAL):
         svg.add_line(shapely_linestring_to_list(line), stroke_width=PEN_WIDTH)
+
 print("{:<50s}: {}".format("added buildings", len(buildings_small) + len(buildings_large)))
 
 for road in roads_railway:
-    svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0.5, layer="roads")
+    for poly in shapely_polygon_to_list(road):
+        svg.add_polygon(poly, stroke_width=PEN_WIDTH, opacity=0.5, layer="roads")
 # for road in roads_small:
 #     svg.add_polygon(shapely_polygon_to_list(road), stroke_width=PEN_WIDTH, opacity=0, layer="roads")
 for road in roads_medium:
