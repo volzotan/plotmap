@@ -21,13 +21,8 @@ psql -d osm -c "CREATE EXTENSION postgis;"
 psql -d osm -c "CREATE EXTENSION hstore;" # only required for hstore support
 echo "ALTER USER osm WITH PASSWORD 'osm';" |psql -d osm
 
-# read the data to cache
+# read the data to cache and write to DB
 
-./imposm import -mapping mapping.yml -write -connection postgis://osm:osm@localhost/osm
-
-# write the data from cache to DB
-
-./imposm import -mapping example-mapping.yml -write -connection postgis://osm:osm@localhost/osm
+./imposm import -mapping mapping.yml -read germany-latest.osm.pbf -write -connection postgis://osm:osm@localhost/osm
 
 # read: https://imposm.org/docs/imposm3/latest/tutorial.html#preparation
-
