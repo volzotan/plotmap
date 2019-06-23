@@ -4,17 +4,16 @@ from datetime import datetime
 
 import numpy as np
 
-tree = ET.parse("test.svg")  
-root = tree.getroot()
+# SVG_FILENAME = "test.svg"
+# SVG_FILENAME = "dtm/elevation_lines.svg"
+SVG_FILENAME = "dtm/weimar_50m.svg"
+# SVG_FILENAME = "dtm/thueringen_50m.svg"
 
-DEFAULT_NS = "{" + root.nsmap[None] + "}"
-INKSCAPE_NS = "{" + root.nsmap["inkscape"] + "}"
-
-TRAVEL_SPEED = 3000
-WRITE_SPEED = 2000
+TRAVEL_SPEED = 5000
+WRITE_SPEED = 2500
 
 COMP_TOLERANCE = 0.001
-MIN_LINE_LENGTH = 1.0 # in mm
+MIN_LINE_LENGTH = 0.3 # in mm
 
 OUTPUT_FILENAME = "test.gcode"
 
@@ -22,6 +21,14 @@ CMD_MOVE = "G1  X{0:.3f} Y{1:.3f}\n"
 CMD_PEN_UP = "G1 Z1 F1000\n"
 
 state_pen_up = True
+
+OPTIMIZE_ORDER = True
+
+tree = ET.parse(SVG_FILENAME)  
+root = tree.getroot()
+
+DEFAULT_NS = "{" + root.nsmap[None] + "}"
+INKSCAPE_NS = "{" + root.nsmap["inkscape"] + "}"
 
 # np.set_printoptions(precision=4,
 #                        threshold=10000,
@@ -88,12 +95,8 @@ def compare_equal(e0, e1):
 all_lines = []
 
 for layer in root.findall("g", root.nsmap):
-    # print(layer.tag)
-    # print(layer.attrib)
-
     for child in layer:
         all_lines = all_lines + process(child)
-
 
 # all_lines = all_lines[0:3000]
 
@@ -139,43 +142,77 @@ nplines[:, 3] = np.add(nplines[:, 3], maxy)
 # ------------------------------------------------------------------------------------
 # optimize drawing order. greedy (and inefficient)
 
-timer = datetime.now()
+ordered_lines = None
 
-indices_done = [0]
-# indices_done_mask = np.zeros(nplines.shape, dtype=bool)
-indices_done_mask = np.zeros(nplines.shape[0], dtype=bool)
-# indices_done_mask[indices_done, :] = True
-indices_done_mask[indices_done] = True
-ordered_lines = [nplines[0, :]]
+if OPTIMIZE_ORDER:
 
-# nplines_masked = np.ma.masked_array(nplines, mask=indices_done_mask)
+    timer = datetime.now()
 
-for i in range(0, nplines.shape[0]):
+    indices_done = [0]
 
-    print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
-
-    last = ordered_lines[-1]
+    # indices_done_mask = np.zeros(nplines.shape, dtype=bool)
     # indices_done_mask[indices_done, :] = True
+
+    indices_done_mask = np.zeros(nplines.shape[0], dtype=bool)
     indices_done_mask[indices_done] = True
 
-    distance_forw = np.sqrt(np.add(np.power(np.subtract(nplines[:, 0], last[2]), 2), np.power(np.subtract(nplines[:, 1], last[3]), 2)))
-    distance_back = np.sqrt(np.add(np.power(np.subtract(nplines[:, 2], last[2]), 2), np.power(np.subtract(nplines[:, 3], last[3]), 2)))
+    ordered_lines = [nplines[0, :]]
 
-    distance_forw_masked = np.ma.masked_array(distance_forw, mask=indices_done_mask)
-    distance_back_masked = np.ma.masked_array(distance_back, mask=indices_done_mask)
+    # nplines_masked = np.ma.masked_array(nplines, mask=indices_done_mask)
 
-    distance_forw_min = np.argmin(distance_forw_masked)
-    distance_back_min = np.argmin(distance_back_masked)
+    for i in range(0, nplines.shape[0]):
 
-    if distance_forw[distance_forw_min] < distance_back[distance_back_min]:
-        indices_done.append(distance_forw_min)
-        ordered_lines.append(nplines[distance_forw_min, :])
-    else:
-        indices_done.append(distance_back_min)
-        flip = nplines[distance_back_min, :]
-        ordered_lines.append(np.array([flip[2], flip[3], flip[0], flip[1]]))
+        if i%100 == 0:
+            print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
 
-print("optimization done. time: {0:.2f}s".format((datetime.now()-timer).total_seconds()))
+        last = ordered_lines[-1]
+        indices_done_mask[indices_done] = True
+
+        # indices_done_mask[indices_done, :] = True
+
+        # pythagorean distance
+
+        # distance_forw = np.sqrt(np.add(np.power(np.subtract(nplines[:, 0], last[2]), 2), np.power(np.subtract(nplines[:, 1], last[3]), 2)))
+        # distance_forw_masked = np.ma.masked_array(distance_forw, mask=indices_done_mask)
+        # distance_forw_min = np.argmin(distance_forw_masked)
+
+        # distance_back = np.sqrt(np.add(np.power(np.subtract(nplines[:, 2], last[2]), 2), np.power(np.subtract(nplines[:, 3], last[3]), 2)))
+        # distance_back_masked = np.ma.masked_array(distance_back, mask=indices_done_mask)
+        # distance_back_min = np.argmin(distance_back_masked)
+
+        # if distance_forw[distance_forw_min] < distance_back[distance_back_min]:
+        #     indices_done.append(distance_forw_min)
+        #     ordered_lines.append(nplines[distance_forw_min, :])
+        # else:
+        #     indices_done.append(distance_back_min)
+        #     flip = nplines[distance_back_min, :]
+        #     ordered_lines.append(np.array([flip[2], flip[3], flip[0], flip[1]]))
+
+        # manhattan distance
+
+        # mnplines = np.ma.masked_array(nplines, mask=indices_done_mask, axis=0)
+
+        distance_forw = np.add(np.abs(np.subtract(nplines[:, 0], last[2])), np.abs(np.subtract(nplines[:, 1], last[3])))
+        distance_forw = np.ma.masked_array(distance_forw, mask=indices_done_mask)
+        distance_forw_min = np.argmin(distance_forw)
+
+        distance_back = np.add(np.abs(np.subtract(nplines[:, 2], last[2])), np.abs(np.subtract(nplines[:, 3], last[3])))
+        distance_back = np.ma.masked_array(distance_back, mask=indices_done_mask)
+        distance_back_min = np.argmin(distance_back)
+
+        if distance_forw[distance_forw_min] < distance_back[distance_back_min]:
+            indices_done.append(distance_forw_min)
+            ordered_lines.append(nplines[distance_forw_min, :])
+        else:
+            indices_done.append(distance_back_min)
+            flip = nplines[distance_back_min, :]
+            ordered_lines.append(np.array([flip[2], flip[3], flip[0], flip[1]]))
+
+
+    print("optimization done. time: {0:.2f}s".format((datetime.now()-timer).total_seconds()))
+
+else:
+    ordered_lines = nplines
 
 # ------------------------------------------------------------------------------------
 # filter tiny edges/leaves/whatever (small lines which are not connected)

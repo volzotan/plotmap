@@ -22,15 +22,15 @@ with open(filename) as f:
         if len(line) == 0:
             print("empty line")
         
-        if line.startswith("G1 Z1"):
+        if line.startswith("G1 Z1") or line.startswith("G0 Z1"):
             pen_up += 1
             state_travel = True
 
-        if line.startswith("G1 Z0"):
+        if line.startswith("G1 Z0") or line.startswith("G0 Z0"):
             pen_down += 1
             state_travel = False
 
-        if line.startswith("G1  X"):
+        if line.startswith("G1  X") or line.startswith("G0  X"):
             s = line.split(" ")
             x = float(s[2][1:])
             y = float(s[3][1:])
