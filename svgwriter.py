@@ -1,5 +1,6 @@
 import math
 from datetime import datetime
+import random
 
 class SvgWriter(object):
 
@@ -55,13 +56,30 @@ class SvgWriter(object):
         for coord in coords:
             self.add_line(coord, **kwargs)
 
-    def add_polygon(self, coords, stroke_width=1, stroke=[0, 0, 0], fill=[120, 120, 120], opacity=1.0, layer="default", hatching=None):
+    def add_polygon(self, coords, 
+            stroke_width=1, 
+            stroke=[0, 0, 0], 
+            fill=[120, 120, 120], 
+            opacity=1.0, 
+            repeat=1,
+            wiggle=0,
+            layer="default", 
+            hatching=None):
+
         options = {}
         options["stroke-width"]     = stroke_width
         options["stroke"]           = stroke
         options["fill"]             = fill
         options["opacity"]          = opacity
-        self.layers[layer]["polygons"].append((coords, options))
+
+        if wiggle > 0:
+            coords = coords.copy()
+
+            for i in range(0, len(coords)):
+                coords[i] = [coords[i][0] + random.uniform(-wiggle, wiggle), coords[i][1] + random.uniform(-wiggle, wiggle)]
+
+        for _ in range(0, repeat):
+            self.layers[layer]["polygons"].append((coords, options))
 
         if hatching is not None:
             self._add_hatching_for_polygon(coords, hatching)

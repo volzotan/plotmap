@@ -1,35 +1,36 @@
 import sys
 sys.path.append("..")
 from svgwriter import SvgWriter
+import maptools
 
 from datetime import datetime
+from functools import partial
 
 import rasterio
 import rasterio.features
 import rasterio.warp
 from rasterio import mask
+
 import psycopg2
+import pyproj
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 
 import shapely
 from shapely.wkb import loads
-
-import pyproj
-from functools import partial
 from shapely.ops import transform
+from shapely.geometry import Polygon
 
-import cv2
 
 DB_NAME = "import"
 DB_PREFIX = "osm_"
 
 TIMER_STRING = "{:<50s}: {:2.2f}s"
 
-CITY = "Weimar"
-NUM_ELEVATION_LINES = 15
+NUM_ELEVATION_LINES = 10
 
-MAP_WIDTH = 100
+MAP_WIDTH = 500
 MAP_SIZE = [1000, 1000]
 MAP_SCALE = MAP_SIZE[0] / float(MAP_WIDTH)
 
@@ -68,6 +69,7 @@ def simplify_polygons(polygons):
     polygons_simplified = []
 
     for poly in polygons:
+
         new_poly = []
 
         if len(poly) < 20:
@@ -77,34 +79,35 @@ def simplify_polygons(polygons):
             polygons_simplified.append(poly)
             continue
 
-        polygons_simplified.append(poly)
+        for i in range(0, len(poly)):
+            if i%3 == 0:
+                new_poly.append(poly[i])
 
-        # for i in range(0, len(poly)):
-        #     if i%2 == 0:
-        #         new_poly.append(poly[i])
-
-        # polygons_simplified.append(new_poly)
+        polygons_simplified.append(new_poly)
 
     return polygons_simplified
 
-timer_start = datetime.now()
+shape = None
+
+# BOUNDARY = "Weimar"
+BOUNDARY = "Thüringen"
 curs.execute("""
     SELECT geometry 
     FROM {0}.{1}admin 
     WHERE name='{2}' 
     ORDER BY admin_level ASC
-""".format(DB_NAME, DB_PREFIX, CITY))
+""".format(DB_NAME, DB_PREFIX, BOUNDARY))
 results = curs.fetchall()
-
 shape = loads(results[0][0], hex=True)
 
-project = partial(
-    pyproj.transform,
-    pyproj.Proj(init='epsg:3785'), # source coordinate system
-    pyproj.Proj(init='epsg:3044')) # destination coordinate system
+if shape is not None:
 
-shape = [transform(project, shape)]
-print(TIMER_STRING.format("load shape data", (datetime.now()-timer_start).total_seconds()))
+    project = partial(
+        pyproj.transform,
+        pyproj.Proj(init='epsg:3785'), # source coordinate system
+        pyproj.Proj(init='epsg:3044')) # destination coordinate system
+
+    shape = transform(project, shape)
 
 timer_start = datetime.now()
 with rasterio.open('thueringen_50m.tif') as dataset:
@@ -119,22 +122,50 @@ with rasterio.open('thueringen_50m.tif') as dataset:
     # plt.matshow(band)
     # plt.savefig("data1.png")
 
-    # out_image, out_transform = mask.mask(dataset, shape, crop=True)
-    # # out_meta = dataset.meta.copy()
-    # # reduce the image dimensions from (1, x, y) to (x, y)
-    # band = np.squeeze(np.asarray(out_image))
+    if shape is not None:
+        out_image, out_transform = mask.mask(dataset, [shape], crop=True)
 
-    band = dataset.read(1)
+        # out_meta = dataset.meta.copy()
+
+        # reduce the image dimensions from (1, x, y) to (x, y)
+        band = np.squeeze(np.asarray(out_image))
+
+        MAP_SIZE = (band.shape[1], band.shape[0])
+        MAP_SCALE = float(MAP_WIDTH) / MAP_SIZE[0]
+
+        # print(list(shape.bounds))
+        # print(out_transform)
+
+        m = np.linalg.inv(np.asarray(out_transform).reshape(3, 3))
+        print(m)
+        m = [m[0, 0], m[0, 1], m[1, 0], m[1, 1], m[1, 2], m[0, 2]]
+        print(m)
+
+
+        shape = shapely.affinity.affine_transform(shape, m)
+
+        # # mirror the shape
+        # shape = shapely.affinity.affine_transform(shape, [1, 0, 0, -1, 0, 0])
+
+        # # downscale 50m meter to pixel factor
+        # shape = shapely.affinity.scale(shape, xfact=1/50, yfact=1/50, origin=(0, 0))
+
+        # move shape to 0,0
+        shape = shapely.affinity.translate(shape, xoff=-shape.bounds[0], yoff=-shape.bounds[1])
+
+        # downscale own map scale factor
+        shape = shapely.affinity.scale(shape, xfact=MAP_SCALE, yfact=MAP_SCALE, origin=(0, 0))
+ 
+    else:
+        band = dataset.read(1)
+
+        MAP_SIZE = (band.shape[1], band.shape[0])
+        MAP_SCALE = float(MAP_WIDTH) / MAP_SIZE[0]
 
     print(TIMER_STRING.format("load raster data", (datetime.now()-timer_start).total_seconds()))
     timer_start = datetime.now()
 
     band = band.clip(min=0)
-
-    MAP_SIZE = (band.shape[1], band.shape[0])
-    MAP_SCALE = float(MAP_WIDTH) / MAP_SIZE[0]
-
-    print(MAP_SCALE)
 
     min_elevation = np.min(band[band > 0])
     max_elevation = np.max(band)
@@ -181,6 +212,12 @@ print(TIMER_STRING.format("simplify polygons", (datetime.now()-timer_start).tota
 timer_start = datetime.now()
 for poly in polygons_simplified:
     svg.add_polygon(poly, stroke_width=0.25, opacity=0) # , opacity=0.02
+
+if shape is not None:
+    shape_buffered = shape.buffer(10)
+    for poly in maptools.shapely_polygon_to_list(shape_buffered):
+        svg.add_polygon(poly, stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
+        # svg.add_polygon(simplify_polygons([poly])[0], stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
 
 print(TIMER_STRING.format("loading svgwriter", (datetime.now()-timer_start).total_seconds()))
 

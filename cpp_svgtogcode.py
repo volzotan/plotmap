@@ -14,7 +14,7 @@ import pandas as pd
 SVG_FILENAME = "dtm/thueringen_50m.svg"
 # SVG_FILENAME = "shapely.svg"
 
-MAX_LINES_PER_GRAPH = 100000
+MAX_LINES_PER_GRAPH = 50000
 
 TRAVEL_SPEED = 5000
 WRITE_SPEED = 2500
@@ -121,6 +121,10 @@ number_duplicates = len(all_lines) - unique.shape[0]
 print("cleaned duplicates: {0} | duplicate ratio: {1:.2f}%".format(number_duplicates, (number_duplicates/len(all_lines))*100))
 
 nplines = unique
+# np.random.shuffle(nplines)
+
+distance_from_home = np.sqrt(np.add(np.power(nplines[:, 0], 2), np.power(nplines[:, 1], 2)))
+nplines = nplines[np.argsort(distance_from_home), :]
 
 # ------------------------------------------------------------------------------------
 # filter tiny lines
@@ -350,9 +354,15 @@ def order_lines(lines):
 
     return ordered_indices
 
+print("calculating ways between subgraphs... ({} subgraphs)".format(len(subgraphs_start_ends)))
+
+timer_start = datetime.now()
+
 ordered_lines = []
 for index in order_lines(subgraphs_start_ends):
     ordered_lines = ordered_lines + lines_of_subgraphs[index]
+
+print(TIMER_STRING.format("subgraph connections", (datetime.now()-timer_start).total_seconds()))
 
 # for i in range(1, len(lines_of_subgraphs)-1):
 

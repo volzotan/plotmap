@@ -20,9 +20,10 @@ TIMER_STRING = "{:<50s}: {:2.2f}s"
 BUILDING_AREA_THRESHOLD_FILTER  = 10.0
 BUILDING_AREA_THRESHOLD_SMALL   = 1500.0 
 
-MAP_CENTER      = [50.979858, 11.325714]
+MAP_CENTER      = [50.979858, 11.325714] # Weimar
+MAP_CENTER      = [53.7404084,7.4809997] # Langeoog
 MAP_SIZE        = [210-10, 297-10]          # unit for data: m / unit for SVG elements: px or mm
-MAP_SIZE_SCALE  = 25.0                       # increase or decrease MAP_SIZE by factor
+MAP_SIZE_SCALE  = 50.0                       # increase or decrease MAP_SIZE by factor
 
 PEN_WIDTH = 0.25
 
