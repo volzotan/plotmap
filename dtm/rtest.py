@@ -20,15 +20,19 @@ import matplotlib.pyplot as plt
 import shapely
 from shapely.wkb import loads
 from shapely.ops import transform
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import CAP_STYLE, JOIN_STYLE
 
+DATASET_FILE = "thueringen_50m.tif"
+# DATASET_FILE = "thueringen_20m.tif"
+# DATASET_FILE = "nordrheinwestfalen_20m.tif"
 
 DB_NAME = "import"
 DB_PREFIX = "osm_"
 
 TIMER_STRING = "{:<50s}: {:2.2f}s"
 
-NUM_ELEVATION_LINES = 10
+NUM_ELEVATION_LINES = 50
 
 MAP_WIDTH = 500
 MAP_SIZE = [1000, 1000]
@@ -75,19 +79,51 @@ def simplify_polygons(polygons):
         if len(poly) < 20:
             continue
 
-        if len(poly) < 30:
-            polygons_simplified.append(poly)
-            continue
-
-        for i in range(0, len(poly)):
-            if i%3 == 0:
-                new_poly.append(poly[i])
-
-        polygons_simplified.append(new_poly)
+        polygons_simplified.append(maptools.simplify_polygon(poly, epsilon=0.5))
 
     return polygons_simplified
 
-shape = None
+def project_shape(shape):
+
+    project = partial(
+        pyproj.transform,
+        pyproj.Proj(init='epsg:3785'), # source coordinate system
+        pyproj.Proj(init='epsg:3044')) # destination coordinate system
+
+    return transform(project, shape)
+
+def _reproject(shape, out_transform):
+
+    m = np.linalg.inv(np.asarray(out_transform).reshape(3, 3))
+    m = [m[0, 0], m[0, 1], m[1, 0], m[1, 1], m[1, 2], m[0, 2]]
+    shape = shapely.affinity.affine_transform(shape, m)
+
+    return shape
+
+def reproject_shape(shape, out_transform, map_scale, offset=None):
+
+    shape = _reproject(shape, out_transform)
+
+    # # mirror the shape
+    # shape = shapely.affinity.affine_transform(shape, [1, 0, 0, -1, 0, 0])
+
+    # # downscale 50m meter to pixel factor
+    # shape = shapely.affinity.scale(shape, xfact=1/50, yfact=1/50, origin=(0, 0))
+
+    # move shape to 0,0
+    if offset is None:
+        shape = shapely.affinity.translate(shape, xoff=-shape.bounds[0], yoff=-shape.bounds[1])
+    else:
+        shape = shapely.affinity.translate(shape, xoff=-offset[0], yoff=-offset[1])
+
+    # downscale own map scale factor
+    shape = shapely.affinity.scale(shape, xfact=MAP_SCALE, yfact=MAP_SCALE, origin=(0, 0))
+
+    return shape
+
+
+boundary_shape = None
+cutout_shapes = []
 
 # BOUNDARY = "Weimar"
 BOUNDARY = "Thüringen"
@@ -98,19 +134,30 @@ curs.execute("""
     ORDER BY admin_level ASC
 """.format(DB_NAME, DB_PREFIX, BOUNDARY))
 results = curs.fetchall()
-shape = loads(results[0][0], hex=True)
+boundary_shape = loads(results[0][0], hex=True)
 
-if shape is not None:
+if boundary_shape is not None:
+    boundary_shape = project_shape(boundary_shape)
 
-    project = partial(
-        pyproj.transform,
-        pyproj.Proj(init='epsg:3785'), # source coordinate system
-        pyproj.Proj(init='epsg:3044')) # destination coordinate system
+CUTOUT = ["Weimar", "Erfurt"]
+for coutout_name in CUTOUT:
+    curs.execute("""
+        SELECT geometry 
+        FROM {0}.{1}admin 
+        WHERE name='{2}' 
+        ORDER BY admin_level ASC
+    """.format(DB_NAME, DB_PREFIX, coutout_name))
+    results = curs.fetchall()
+    shape = loads(results[0][0], hex=True)
+    cutout_shapes.append(shape)
 
-    shape = transform(project, shape)
+shapes_projected = []
+for shape in cutout_shapes:
+    shapes_projected.append(project_shape(shape))
+cutout_shapes = shapes_projected
 
 timer_start = datetime.now()
-with rasterio.open('thueringen_50m.tif') as dataset:
+with rasterio.open(DATASET_FILE) as dataset:
 
     # print("indexes: {}".format(dataset.indexes))
     # print("size: {} x {}".format(dataset.width, dataset.height))
@@ -122,9 +169,8 @@ with rasterio.open('thueringen_50m.tif') as dataset:
     # plt.matshow(band)
     # plt.savefig("data1.png")
 
-    if shape is not None:
-        out_image, out_transform = mask.mask(dataset, [shape], crop=True)
-
+    if boundary_shape is not None:
+        out_image, out_transform = mask.mask(dataset, [boundary_shape], crop=True)
         # out_meta = dataset.meta.copy()
 
         # reduce the image dimensions from (1, x, y) to (x, y)
@@ -133,28 +179,15 @@ with rasterio.open('thueringen_50m.tif') as dataset:
         MAP_SIZE = (band.shape[1], band.shape[0])
         MAP_SCALE = float(MAP_WIDTH) / MAP_SIZE[0]
 
-        # print(list(shape.bounds))
-        # print(out_transform)
+        reprojected_boundary = _reproject(boundary_shape, out_transform)
+        offset = [reprojected_boundary.bounds[0], reprojected_boundary.bounds[1]]
 
-        m = np.linalg.inv(np.asarray(out_transform).reshape(3, 3))
-        print(m)
-        m = [m[0, 0], m[0, 1], m[1, 0], m[1, 1], m[1, 2], m[0, 2]]
-        print(m)
+        boundary_shape = reproject_shape(boundary_shape, out_transform, MAP_SCALE)
 
-
-        shape = shapely.affinity.affine_transform(shape, m)
-
-        # # mirror the shape
-        # shape = shapely.affinity.affine_transform(shape, [1, 0, 0, -1, 0, 0])
-
-        # # downscale 50m meter to pixel factor
-        # shape = shapely.affinity.scale(shape, xfact=1/50, yfact=1/50, origin=(0, 0))
-
-        # move shape to 0,0
-        shape = shapely.affinity.translate(shape, xoff=-shape.bounds[0], yoff=-shape.bounds[1])
-
-        # downscale own map scale factor
-        shape = shapely.affinity.scale(shape, xfact=MAP_SCALE, yfact=MAP_SCALE, origin=(0, 0))
+        shapes_reprojected = []
+        for shape in cutout_shapes:
+            shapes_reprojected.append(reproject_shape(shape, out_transform, MAP_SCALE, offset=offset))
+        cutout_shapes = shapes_reprojected
  
     else:
         band = dataset.read(1)
@@ -200,7 +233,9 @@ for height_level in elevation_lines:
 
         polys.append(coords)
 
+# Problem Douglas Peucker may produce self intersecting polygons...
 polygons_simplified = simplify_polygons(polys)
+# polygons_simplified = polys
 
 for poly in polygons_simplified:
     for i in range(0, len(poly)):
@@ -210,14 +245,74 @@ for poly in polygons_simplified:
 print(TIMER_STRING.format("simplify polygons", (datetime.now()-timer_start).total_seconds()))
 
 timer_start = datetime.now()
+elevation_lines_cutout = []
+elevation_lines_cutout2 = polygons_simplified
+skipped_lines = 0
+malformed_polygons = 0
+for shape in cutout_shapes:
+    for line in elevation_lines_cutout2:
+
+        pline = line
+        if type(pline) is MultiPolygon:
+            print("NARF")
+        if not type(pline) is Polygon:
+            pline = Polygon(line)
+     
+        try:
+            cut_lines = maptools.unpack_multipolygon(pline.difference(shape))
+            for l in cut_lines:
+                elevation_lines_cutout.append(l)
+        except shapely.errors.TopologicalError as tpe:
+            malformed_polygons += 1
+    elevation_lines_cutout2 = elevation_lines_cutout
+elevation_lines = elevation_lines_cutout
+
+print(TIMER_STRING.format("cutout elevation lines", (datetime.now()-timer_start).total_seconds()))
+print("cutout elevation line errors: skipped {} | malformed {}".format(skipped_lines, malformed_polygons))
+
+timer_start = datetime.now()
+
 for poly in polygons_simplified:
     svg.add_polygon(poly, stroke_width=0.25, opacity=0) # , opacity=0.02
 
-if shape is not None:
-    shape_buffered = shape.buffer(10)
-    for poly in maptools.shapely_polygon_to_list(shape_buffered):
-        svg.add_polygon(poly, stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
-        # svg.add_polygon(simplify_polygons([poly])[0], stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
+# for cutout_poly in cutout_shapes:
+#     for poly in maptools.shapely_polygon_to_list(cutout_poly):
+#         svg.add_polygon(poly, stroke_width=0.25, opacity=0.5)
+
+if boundary_shape is not None:
+    # shape_buffered = shape.buffer(10)
+    # for poly in maptools.shapely_polygon_to_list(shape_buffered):
+    #     svg.add_polygon(poly, stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
+    #     # svg.add_polygon(simplify_polygons([poly])[0], stroke_width=0.25, opacity=0, repeat=20, wiggle=2)
+
+    for i in range(0, 3):
+        shape_buffered = boundary_shape.buffer(i/3)
+        for poly in maptools.shapely_polygon_to_list(shape_buffered):
+            svg.add_polygon(poly, stroke_width=0.25, opacity=0)
+
+    buffer_params = {
+        "cap_style": CAP_STYLE.flat, 
+        "join_style": JOIN_STYLE.mitre,
+        "mitre_limit": 5.0
+    }
+
+    shape = boundary_shape.buffer(2, **buffer_params)
+
+    shape_buffered1 = boundary_shape.buffer(4, **buffer_params)
+    # for poly in maptools.shapely_polygon_to_list(shape_buffered1):
+    #     svg.add_polygon(poly, stroke_width=0.25, opacity=0)
+
+    shape_buffered2 = boundary_shape.buffer(6, **buffer_params)
+    # for poly in maptools.shapely_polygon_to_list(shape_buffered2):
+    #     svg.add_polygon(poly, stroke_width=0.25, opacity=0)
+
+    shape_outline1 = shape_buffered1.difference(shape)
+    for line in maptools.Hatching.create_hatching(shape_outline1, distance=2.5, connect=False):
+        svg.add_line(maptools.shapely_linestring_to_list(line), stroke_width=0.25)
+
+    shape_outline2 = shape_buffered2.difference(shape_buffered1)
+    for line in maptools.Hatching.create_hatching(shape_outline2, distance=5.0, connect=False):
+        svg.add_line(maptools.shapely_linestring_to_list(line), stroke_width=0.25)
 
 print(TIMER_STRING.format("loading svgwriter", (datetime.now()-timer_start).total_seconds()))
 

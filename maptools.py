@@ -10,6 +10,9 @@ from shapely import ops
 from shapely.prepared import prep
 from shapely.geometry import GeometryCollection, MultiLineString, LineString, Polygon, MultiPolygon
 
+import numpy as np
+import cv2
+
 class Converter(object):
 
     EQUATOR = 40075016.68557849
@@ -317,19 +320,57 @@ def clip_layer_by_box(layer, box):
 
     return clipped
 
+def unpack_multipolygon(item):
+    result = []
+
+    if type(item) is MultiPolygon:
+        for g in list(item.geoms):
+            if type(g) is Polygon:
+                result.append(g)
+            else:
+                print("narf!")
+                print(type(g))
+    else:
+        result.append(item)
+
+    return result
+
+
 def unpack_multipolygons(layer):
     result = []
 
     for item in layer:
-        if type(item) is MultiPolygon:
-            for g in list(item.geoms):
-                if type(g) is Polygon:
-                    result.append(g)
-                else:
-                    print("narf!")
-                    print(type(g))
-        else:
-            result.append(item)
+        result = result + unpack_multipolygon(item)
 
     return result
 
+
+"""
+    Remove points in the given polygon, but only points which are not shared with the parent polygon
+    (ie. parent may be an outline or a neighbouring polygon and no gaps between these should be produced)
+"""
+def simplify_polygon(poly, epsilon=0.1): #, parent=None):
+
+    # nppoly = np.asarray(poly)
+
+    # if parent is not None:
+    #     npparent = np.asarray(parent)
+
+    return_shapely_polygon = False
+
+    if type(poly) is Polygon:
+        tmp = poly.exterior.coords
+        return_shapely_polygon = True
+    else:
+        tmp = poly
+
+    tmp = np.asarray(tmp, dtype=np.float32)
+
+    approximatedPolygon = cv2.approxPolyDP(tmp, epsilon, True)
+    approximatedPolygon = np.concatenate(approximatedPolygon) 
+    approximatedPolygon = approximatedPolygon.tolist()
+
+    if return_shapely_polygon:
+        return Polygon(approximatedPolygon)
+    else:
+        return approximatedPolygon
