@@ -323,7 +323,7 @@ def clip_layer_by_box(layer, box):
 def unpack_multipolygon(item):
     result = []
 
-    if type(item) is MultiPolygon:
+    if type(item) in [MultiPolygon, GeometryCollection]:
         for g in list(item.geoms):
             if type(g) is Polygon:
                 result.append(g)

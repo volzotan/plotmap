@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import shapely
 from shapely.wkb import loads
 from shapely.ops import transform
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
 from shapely.geometry import CAP_STYLE, JOIN_STYLE
 
 DATASET_FILE = "thueringen_50m.tif"
@@ -120,6 +120,47 @@ def reproject_shape(shape, out_transform, map_scale, offset=None):
     shape = shapely.affinity.scale(shape, xfact=MAP_SCALE, yfact=MAP_SCALE, origin=(0, 0))
 
     return shape
+
+def cutout(polys, cutshape):
+    result = []
+
+    invalid = 0
+
+    for poly in polys:
+
+        background_objects = []
+
+        if type(poly) is MultiPolygon:
+            background_objects = background_objects + unpack_multipolygon(poly)
+        elif type(poly) is GeometryCollection:
+            background_objects = background_objects + unpack_multipolygon(poly)
+        elif type(poly) is Polygon:
+            background_objects.append(poly)
+        elif type(poly) is list:
+            if len(poly) < 3:
+                continue
+
+            background_objects.append(Polygon(poly))
+        else:
+            print(type(poly))
+
+        for background_object in background_objects:
+            try:
+                # cut_lines = maptools.unpack_multipolygon(pline.difference(shape))
+
+                if not background_object.is_valid:
+                    background_object = background_object.buffer(0)
+
+                result_object = background_object.difference(cutshape)
+                for obj in maptools.unpack_multipolygon(result_object):
+                    result.append(obj)
+            except shapely.errors.TopologicalError as tpe:
+                invalid += 1
+
+    if invalid > 0:
+        print("invalid polygons: {}".format(invalid))
+
+    return result
 
 
 boundary_shape = None
@@ -245,30 +286,19 @@ for poly in polygons_simplified:
 print(TIMER_STRING.format("simplify polygons", (datetime.now()-timer_start).total_seconds()))
 
 timer_start = datetime.now()
-elevation_lines_cutout = []
-elevation_lines_cutout2 = polygons_simplified
-skipped_lines = 0
-malformed_polygons = 0
-for shape in cutout_shapes:
-    for line in elevation_lines_cutout2:
-
-        pline = line
-        if type(pline) is MultiPolygon:
-            print("NARF")
-        if not type(pline) is Polygon:
-            pline = Polygon(line)
-     
-        try:
-            cut_lines = maptools.unpack_multipolygon(pline.difference(shape))
-            for l in cut_lines:
-                elevation_lines_cutout.append(l)
-        except shapely.errors.TopologicalError as tpe:
-            malformed_polygons += 1
-    elevation_lines_cutout2 = elevation_lines_cutout
-elevation_lines = elevation_lines_cutout
+elevation_lines_cutout = polygons_simplified
+# skipped_lines = 0
+# malformed_polygons = 0
+for cutshape in cutout_shapes:
+    elevation_lines_cutout = cutout(elevation_lines_cutout, cutshape)
+    
+polygons_simplified = []
+for line in elevation_lines_cutout:
+    for poly in maptools.shapely_polygon_to_list(line):
+        polygons_simplified.append(poly)
 
 print(TIMER_STRING.format("cutout elevation lines", (datetime.now()-timer_start).total_seconds()))
-print("cutout elevation line errors: skipped {} | malformed {}".format(skipped_lines, malformed_polygons))
+# print("cutout elevation line errors: skipped {} | malformed {}".format(skipped_lines, malformed_polygons))
 
 timer_start = datetime.now()
 
