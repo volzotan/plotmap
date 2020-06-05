@@ -2,6 +2,8 @@ import math
 from datetime import datetime
 import random
 
+from shapely.geometry import GeometryCollection, MultiLineString, LineString, Polygon, MultiPolygon
+
 class SvgWriter(object):
 
     def __init__(self, filename, dimensions=None, image=None):
@@ -45,7 +47,11 @@ class SvgWriter(object):
         self.layers[layer]["rectangles"].append([*coords, stroke_width, stroke, opacity])
 
     # coords: [[x1, y1], [x2, x2]]
-    def add_line(self, coords, stroke_width=1, stroke=[255, 0, 0], stroke_opacity=1.0, layer="default"):
+    def add_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, layer="default"):
+
+        if len(coords) != 2:
+            raise Exception("add_line: malformed input data: {}".format(coords))
+
         options = {}
         options["stroke-width"]     = stroke_width
         options["stroke"]           = stroke
@@ -56,13 +62,12 @@ class SvgWriter(object):
         for coord in coords:
             self.add_line(coord, **kwargs)
 
-    def add_polygon(self, coords, 
+    def add_polygon(self, poly, 
             stroke_width=1, 
             stroke=[0, 0, 0], 
             fill=[120, 120, 120], 
             opacity=1.0, 
             repeat=1,
-            wiggle=0,
             layer="default", 
             hatching=None):
 
@@ -72,19 +77,15 @@ class SvgWriter(object):
         options["fill"]             = fill
         options["opacity"]          = opacity
 
-        if wiggle > 0:
-            coords = coords.copy()
-
-            for i in range(0, len(coords)):
-                coords[i] = [coords[i][0] + random.uniform(-wiggle, wiggle), coords[i][1] + random.uniform(-wiggle, wiggle)]
-
-        for _ in range(0, repeat):
-            self.layers[layer]["polygons"].append((coords, options))
+        if stroke_width > 0:
+            self.layers[layer]["polygons"].append((poly.exterior.coords, options))
+            for hole in poly.interiors:
+                self.layers[layer]["polygons"].append((hole.coords, options))
 
         if hatching is not None:
-            self._add_hatching_for_polygon(coords, hatching)
+            self._add_hatching_for_polygon(poly, hatching)
 
-    def add_poly_line(self, coords, stroke_width=1, stroke=[255, 0, 0], stroke_opacity=1.0, layer="default"):
+    def add_poly_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, layer="default"):
         options = {}
         options["stroke-width"]     = stroke_width
         options["stroke"]           = stroke
@@ -122,10 +123,13 @@ class SvgWriter(object):
 
     # rotation: 45-90 degrees
     # TODO: 0-45 degrees
-    def add_hatching(self, name, rotation=45, distance=2, stroke_width=0.2):
-        self.hatchings[name] = []
+    def add_hatching(self, name, rotation=45, distance=2, stroke_width=0.2, stroke_dasharray=None):
+        self.hatchings[name] = None
         self.hatching_options[name] = {}
-        self.hatching_options[name]["stroke_width"] = stroke_width
+        self.hatching_options[name]["stroke-width"] = stroke_width
+
+        if stroke_dasharray is not None:
+            self.hatching_options[name]["stroke-dasharray"] = stroke_width
 
         rot_rad = rotation * math.pi / 180.0
 
@@ -135,6 +139,8 @@ class SvgWriter(object):
         south = [[0, self.dimensions[1]], [self.dimensions[0], self.dimensions[1]]]
         west  = [[0, 0], [0, self.dimensions[1]]]
         east  = [[self.dimensions[0], 0], [self.dimensions[0], self.dimensions[1]]]
+
+        hatchlines = []
 
         for i in range(0, int(num_lines)):
             y = i * distance
@@ -161,42 +167,31 @@ class SvgWriter(object):
                 cropped_line.append(east_intersect)
 
             if len(cropped_line) == 2:
-                self.hatchings[name].append(cropped_line)
-                # self.add_line(hatching_line, stroke_width=stroke_width)
+                hatchlines.append(LineString(cropped_line))
+            elif len(cropped_line) > 2:
+                hatchlines.append(LineString(cropped_line[0:2]))
 
-    def _polygon_to_lines(self, polygon_coords):
-        lines = []
-        for i in range(0, len(polygon_coords)-1):
-            cur = polygon_coords[i]
-            nxt = polygon_coords[i+1]
-            lines.append([[cur[0], cur[1]], [nxt[0], nxt[1]]])
+        self.hatchings[name] = MultiLineString(hatchlines)
 
-        return lines
+    def _add_hatching_for_polygon(self, poly, hatching_name):
 
-    def _add_hatching_for_polygon(self, coords, hatching_name):
-        lines = self._polygon_to_lines(coords)
         hatchlines_in_poly = []
 
         if (len(self.hatchings[hatching_name])) <= 0:
             raise Exception("missing hatching: {}".format(hatching_name))
 
-        for hline in self.hatchings[hatching_name]:
-            intersection_points = []
-            for line in lines:
-                intersection_point = self._line_intersection(hline, line)
+        intersections = poly.intersection(self.hatchings[hatching_name])
 
-                if intersection_point is not None:
-                    intersection_points.append(intersection_point)
+        if intersections.is_empty:
+            return
 
-            if len(intersection_points) >= 2:
-                hatchlines_in_poly.append([intersection_points[0], intersection_points[1]])
-            if len(intersection_points) >= 4:
-                hatchlines_in_poly.append([intersection_points[2], intersection_points[3]])
-
-            # TODO ...
-
-        for hip in hatchlines_in_poly:
-            self.add_line(hip, **self.hatching_options[hatching_name])
+        if type(intersections) is LineString:
+            self.add_line(intersections.coords, **self.hatching_options[hatching_name])
+        elif type(intersections) is MultiLineString:
+            for line in intersections.geoms:
+                self.add_line(line.coords, **self.hatching_options[hatching_name])
+        else:
+            raise Exception("error: unknown geometry: {}".format(type(intersections)))
 
 
     def save(self):
@@ -222,24 +217,6 @@ class SvgWriter(object):
             if self.image is not None:
                 out.write("<image x=\"0\" y=\"0\" xlink:href=\"{}\" />".format(self.image))
 
-            # for h in self.hexagons:
-            #     out.write("<path d=\"")
-            #     for cmd in h[0]:
-            #         out.write(cmd[0])
-            #         if (len(cmd) > 1):
-            #             out.write(str(cmd[1]))
-            #             out.write(" ")
-            #             out.write(str(cmd[2]))
-            #             out.write(" ")
-            #     # out.write("\" fill=\"rgba({},{},{},{})\" />".format(int(h[1][0]), int(h[1][1]), int(h[1][2]), int(h[1][3])))
-            #     out.write("\" fill=\"rgb({},{},{})\" fill-opacity=\"{}\" />".format(int(h[1][0]), int(h[1][1]), int(h[1][2]), h[1][3]))
- 
-            # for c in self.circles:
-            #     out.write("<circle cx=\"{}\" cy=\"{}\" fill=\"rgb({},{},{})\" r=\"{}\" />".format(c[0][0], c[0][1], c[2][0], c[2][1], c[2][2], c[1]))
-
-            # for r in self.rectangles:
-            #     out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(*r[0], r[1], *r[2], r[3]))
-
             for layerid in self.layers.keys():
 
                 # if layerid == "default":
@@ -258,7 +235,14 @@ class SvgWriter(object):
                 for line in layer["lines"]:
                     l = line[0]
                     options = line[1]
-                    out.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-width=\"{}\" stroke=\"rgb(1.0, 1.0, 1.0)\" />".format(*l[0], *l[1], options["stroke-width"]))
+                    out.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" ".format(*l[0], *l[1]))
+                    out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))
+                    out.write("stroke=\"rgb({}, {}, {})\" ".format(*options["stroke"]))
+
+                    if "stroke-dasharray" in options:
+                        out.write("stroke-dasharray=\"{}\" ".format(options["stroke-dasharray"]))
+
+                    out.write("/>")
 
                 for poly in layer["polygons"]:
                     p = poly[0]

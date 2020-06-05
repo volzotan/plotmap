@@ -3,7 +3,6 @@ from datetime import datetime
 
 from svgwriter import SvgWriter
 
-import psycopg2
 import shapely
 from shapely.wkb import loads
 from shapely import ops
@@ -13,34 +12,46 @@ from shapely.geometry import GeometryCollection, MultiLineString, LineString, Po
 import numpy as np
 import cv2
 
-class Converter(object):
+EQUATOR = 40075016.68557849
+EQUATOR_HALF = EQUATOR / 2.0
 
-    EQUATOR = 40075016.68557849
-    EQUATOR_HALF = EQUATOR / 2.0
+class Converter(object):
 
     def __init__(self, map_center, map_size, map_size_scale):
         self.map_center_lat_lon = map_center
 
-        self.map_center_m = self._convert_lat_lon(*map_center)
+        self.map_center_m = self.convert_wgs_to_mercator(*map_center)
 
-        self.map_center_m[0] *= self.EQUATOR
-        self.map_center_m[1] *= self.EQUATOR
+        self.map_center_m[0] *= EQUATOR
+        self.map_center_m[1] *= EQUATOR
 
-        self.map_size = [map_size[0] * map_size_scale, map_size[1] * map_size_scale]
+        self.map_size = map_size
         self.map_left = self.map_center_m[0] - self.map_size[0]/2.0
         self.map_top = self.map_center_m[1] - self.map_size[1]/2.0
 
         self.map_size_scale = map_size_scale
 
-    def get_bounding_box(self): # in web mercator
+    def get_bounding_box(self): # in web mercator, i.e. meters
         return [
-            self.map_center_m[0] - self.EQUATOR_HALF - self.map_size[0]/2.0, 
-            (self.map_center_m[1]  - self.EQUATOR_HALF) * -1 - self.map_size[1]/2.0,
-            self.map_center_m[0] - self.EQUATOR_HALF + self.map_size[0]/2.0, 
-            (self.map_center_m[1]  - self.EQUATOR_HALF) * -1  + self.map_size[1]/2.0,
+            self.map_center_m[0] - EQUATOR_HALF - (self.map_size[0] * map_size_scale)/2.0, 
+            (self.map_center_m[1]  - EQUATOR_HALF) * -1 - (self.map_size[1] * map_size_scale)/2.0,
+            self.map_center_m[0] - EQUATOR_HALF + (self.map_size[0] * map_size_scale)/2.0, 
+            (self.map_center_m[1]  - EQUATOR_HALF) * -1  + (self.map_size[1] * map_size_scale)/2.0,
         ]
 
-    def _convert_lat_lon(self, lat, lon):
+    # convert WGS84 (lat, lon) to (-1, 1) in WebMercator
+    def convert_wgs_to_mercator(self, lat, lon):
+
+        e = 1.0E-5
+
+        if lon < -180:
+            lon = -180 + e
+        if lon > 180:
+            lon = 180 - e
+        if lat < -90:
+            lat = -90 + e
+        if lat > 90:
+            lat = 90 - e
 
         x       = (lon + 180.0) / 360.0 
 
@@ -50,21 +61,54 @@ class Converter(object):
 
         return [x, y]
 
-    def convert(self, x, y):
-        mapx = (x - self.map_left) / self.map_size_scale
-        mapy = (y - self.map_top) / self.map_size_scale
+    # convert WebMercator (meter) to (px) in map
+    def convert_mercator_to_map(self, x, y):
+        mapx = (x + EQUATOR_HALF) / self.map_size_scale
+        mapy = ((y - EQUATOR_HALF) * -1) / self.map_size_scale
 
         return mapx, mapy
 
-    def convert_list(self, xs, ys):
+    # convert WGS84 (lat, lon) to (px) in map
+    def convert_wgs_to_map(self, lat, lon):
+        x, y = self.convert_wgs_to_mercator(lat, lon) # results in values in the range of -1 to 1
+        x = x * self.map_size[0]
+        y = y * self.map_size[1]
+        return x, y
+
+    def convert_mercator_to_map_list(self, xs, ys):
         mapxs = []
         mapys = []
 
         for i in range(0, len(xs)):
-            mapxs.append((xs[i] + self.EQUATOR_HALF - self.map_left) / self.map_size_scale)
-            mapys.append((((ys[i] - self.EQUATOR_HALF) * -1) - self.map_top) / self.map_size_scale)
+            mapx, mapy = self.convert_mercator_to_map(xs[i], ys[i])
+            mapxs.append(mapx)
+            mapys.append(mapy)
 
-        return mapxs, mapys 
+        return mapxs, mapys
+
+    def convert_wgs_to_map_list(self, lats, lons):
+        mapxs = []
+        mapys = []
+
+        for i in range(0, len(lats)):
+            mapx, mapy = self.convert_wgs_to_map(lats[i], lons[i])
+            mapxs.append(mapx)
+            mapys.append(mapy)
+
+        return mapxs, mapys
+
+    def convert_wgs_to_map_list_lon_lat(self, lons, lats): # flipped lat/lon
+        mapxs = []
+        mapys = []
+
+        for i in range(0, len(lats)):
+            mapx, mapy = self.convert_wgs_to_map(lats[i], lons[i])
+            mapxs.append(mapx)
+            mapys.append(mapy)
+
+        return mapxs, mapys
+
+
 
 class Color(object):
     PURPLE = '\033[95m'
@@ -175,33 +219,11 @@ class Hatching(object):
 def shapely_polygon_to_list(poly):
     result_list = []
 
-    x, y = poly.exterior.coords.xy
-
-    coords_outer = []
-    for i in range(0, len(x)):
-        coords_outer.append([x[i], y[i]])
-
-    result_list.append(coords_outer)
-
-    holes = list(poly.interiors)
-    for ring in holes:
-        xr, yr = ring.coords.xy
-        ring_coords = []
-        if xr is not None and yr is not None:
-            for i in range(0, len(xr)):
-                ring_coords.append([xr[i], yr[i]])
-        result_list.append(ring_coords)
+    result_list.append(list(poly.exterior.coords))
+    for hole in list(poly.interiors):
+        result_list.append(list(hole.coords))
 
     return result_list
-
-def shapely_linestring_to_list(linestring):
-    x, y = linestring.coords.xy
-
-    coords = []
-    for i in range(0, len(x)):
-        coords.append([x[i], y[i]])
-
-    return coords
 
 # converts a python list to a postgres-syntax compatible value list in " WHERE foo IN ('a', 'b') "-style
 def list_to_pg_str(l):
@@ -356,11 +378,8 @@ def simplify_polygon(poly, epsilon=0.1): #, parent=None):
     # if parent is not None:
     #     npparent = np.asarray(parent)
 
-    return_shapely_polygon = False
-
     if type(poly) is Polygon:
         tmp = poly.exterior.coords
-        return_shapely_polygon = True
     else:
         tmp = poly
 
@@ -370,7 +389,7 @@ def simplify_polygon(poly, epsilon=0.1): #, parent=None):
     approximatedPolygon = np.concatenate(approximatedPolygon) 
     approximatedPolygon = approximatedPolygon.tolist()
 
-    if return_shapely_polygon:
+    try:
         return Polygon(approximatedPolygon)
-    else:
+    except ValueError as ve:
         return approximatedPolygon
