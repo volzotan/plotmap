@@ -1,11 +1,12 @@
 from datetime import datetime
+import os
 
 from svgwriter import SvgWriter
 import maptools
 
 import psycopg2
 import shapely
-from shapely.wkb import loads
+from shapely.wkb import dumps, loads
 from shapely import ops
 from shapely.prepared import prep
 from shapely.geometry import GeometryCollection, MultiLineString, LineString, Polygon, MultiPolygon
@@ -29,10 +30,10 @@ THRESHOLD_CITY_POPULATION       = 500000
 
 CONNECT_DATABASE                = False
 
-DRAW_COASTLINE                  = False
+DRAW_COASTLINE                  = True
 DRAW_PLACES                     = False
 DRAW_BORDERS                    = False
-DRAW_BATHYMETRY                 = True
+DRAW_BATHYMETRY                 = False
 
 """ ------------------------------
 
@@ -50,7 +51,7 @@ if CONNECT_DATABASE:
     curs = conn.cursor()
 
 conv = maptools.Converter(MAP_CENTER, MAP_SIZE, MAP_SIZE_SCALE)
-svg = SvgWriter("world.svg", MAP_SIZE)
+svg = SvgWriter("world.svg", MAP_SIZE, background_color="gray")
 
 print("map size: {:.2f} x {:.2f} meter".format(MAP_SIZE[0]*MAP_SIZE_SCALE, MAP_SIZE[1]*MAP_SIZE_SCALE))
 print("svg size: {:.2f} x {:.2f} units".format(*MAP_SIZE))
@@ -60,20 +61,45 @@ svg.add_layer("places")
 svg.add_layer("borders")
 svg.add_layer("bathymetry")
 
-svg.add_hatching("bathymetry_hatching_32", distance=32)
-svg.add_hatching("bathymetry_hatching_16", distance=16, stroke_dasharray="4 4")
-svg.add_hatching("bathymetry_hatching_8", distance=8)
-svg.add_hatching("bathymetry_hatching_4", distance=4)
-svg.add_hatching("bathymetry_hatching_2", distance=2)
+svg.add_hatching("bathymetry_hatching_6",   distance=16)
+svg.add_hatching("bathymetry_hatching_5",   distance=8, stroke_dasharray="4 4")
+svg.add_hatching("bathymetry_hatching_4",   distance=4)
+svg.add_hatching("bathymetry_hatching_3",   distance=2, stroke_dasharray="4 4")
+svg.add_hatching("bathymetry_hatching_2",   distance=1)
+svg.add_hatching("bathymetry_hatching_1",   distance=0.5, stroke_dasharray="4 4")
 
 coastlines = []
 places = []
 borders = []
 bathymetry = []
 
+# ---------------------------------------- COASTLINES / LAND POLYS ----------------------------------------
+
 # ---------------------------------------- COASTLINES / WATER POLYS ----------------------------------------
 
-if DRAW_COASTLINE:
+def save_pickle_geom(filename, geom):
+
+    if os.path.exists(filename):
+        raise Exception("file does already exist: {}".format(filename))
+
+    f = open(filename, "wb")
+    f.write(dumps(geom))
+    f.close()
+
+def load_pickle_geom(filename):
+
+    if not os.path.exists(filename):
+        raise Exception("file does not exist: {}".format(filename))
+
+    f = open(filename, "r")
+    wkt_data = f.read()
+    f.close()
+
+    return loads(wkt_data)
+
+def load_coastline():
+
+    coastlines = []
 
     COASTLINE_FILE = "world_data/simplified-water-polygons-split-3857/simplified_water_polygons.shp"
 
@@ -85,18 +111,9 @@ if DRAW_COASTLINE:
 
         coastlines.append(shp_geom)
 
-    # coastlines = coastlines[0:100]
+    coastlines = coastlines[0:3000]
 
     print(TIMER_STRING.format("loading coastline data", (datetime.now()-timer_start).total_seconds()))   
-
-    # merge water polygon to single block
-    # master_poly = ops.unary_union(coastlines)
-    # coastlines = [] 
-    # if type(master_poly) is MultiPolygon:
-    #     for g in master_poly.geoms:
-    #         coastlines.append(g)
-    # else:
-    #     coastlines.append(master_poly)
 
     timer_start = datetime.now()
     for i in range(0, len(coastlines)):
@@ -122,7 +139,37 @@ if DRAW_COASTLINE:
             continue
         coastlines_simplified.append(simplified_polygon)
     coastlines = coastlines_simplified
-    print(TIMER_STRING.format("simplifing coastline data ({} errors, {} skipped)".format(errors_occured, skipped), (datetime.now()-timer_start).total_seconds()))   
+
+    print(TIMER_STRING.format("simplifing coastline data ({} errors, {} skipped)".format(errors_occured, skipped), (datetime.now()-timer_start).total_seconds())) 
+
+    return coastlines
+
+if DRAW_COASTLINE:
+
+    PICKLE_FILE = "coastlines.pickle"
+    complete_poly = None
+
+    if os.path.exists(PICKLE_FILE):
+        master_poly = load_pickle_geom(PICKLE_FILE)
+        print("loaded coastlines from pickle: {}".format(PICKLE_FILE))
+    else:
+        coastlines = load_coastline()
+
+        # merge water polygon to single block
+        complete_poly = ops.unary_union(coastlines)
+        save_pickle_geom("coastlines.pickle", complete_poly)
+
+    timer_start = datetime.now()
+
+    coastlines = [] 
+    if type(master_poly) is MultiPolygon:
+        for g in master_poly.geoms:
+            coastlines.append(g)
+    else:
+        coastlines.append(master_poly)
+
+    print(TIMER_STRING.format("merging coastline data", (datetime.now()-timer_start).total_seconds()))   
+
 
 # --------------------------------------------------------------------------------
 
@@ -229,27 +276,39 @@ def parse_shapefile(filename, min_area=None, latlons_flipped=False):
 
     return geometries
 
-bathymetry32 = []
-bathymetry16 = []
-bathymetry8 = []
-bathymetry4 = []
-bathymetry2 = []
+def add_to_writer(polys, hatching_name):
+
+    options = {
+        "stroke_width": 0,
+        "opacity": 0.0,
+        "layer": "bathymetry"
+    }
+
+    for i in range(0, len(polys)):
+        p = polys[i]
+        if not p.is_valid:
+            print("error: polygon {}/{} not valid".format(i, len(polys)))
+            continue
+        svg.add_polygon(p, **options, hatching=hatching_name)
 
 if DRAW_BATHYMETRY:
 
     timer_start = datetime.now()
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_A_10000.shp", min_area=1.0, latlons_flipped=True)
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_B_9000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_C_8000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_D_7000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_E_6000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry2 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_F_5000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry4 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_G_4000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry8 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_H_3000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry8 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_I_2000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry8 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_J_1000.shp",  min_area=1.0, latlons_flipped=True)
-    bathymetry16 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_K_200.shp",   min_area=1.0, latlons_flipped=True)
-    bathymetry32 += parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_L_0.shp",     min_area=1.0, latlons_flipped=True)
+
+    bathymetry = []
+
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_A_10000.shp", min_area=1.0, latlons_flipped=True), "bathymetry_hatching_1")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_B_9000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_1")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_C_8000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_2")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_D_7000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_2")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_E_6000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_2")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_F_5000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_3")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_G_4000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_3")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_H_3000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_4")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_I_2000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_4")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_J_1000.shp",  min_area=1.0, latlons_flipped=True), "bathymetry_hatching_5")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_K_200.shp",   min_area=1.0, latlons_flipped=True), "bathymetry_hatching_5")
+    add_to_writer(parse_shapefile("world_data/10m_physical/ne_10m_bathymetry_L_0.shp",     min_area=1.0, latlons_flipped=True), "bathymetry_hatching_6")
 
     print(TIMER_STRING.format("parsing sea data", (datetime.now()-timer_start).total_seconds()))  
 
@@ -258,7 +317,7 @@ if DRAW_BATHYMETRY:
 timer_start = datetime.now()
 
 for coastline in coastlines:
-    svg.add_polygon(coastline, stroke_width=0, opacity=0.0, layer="coastlines", hatching="coastlines_hatching")
+    svg.add_polygon(coastline, stroke_width=0.2, opacity=0.0, stroke=[255, 255, 255], layer="coastlines") #, hatching="coastlines_hatching")
     # for poly in maptools.shapely_polygon_to_list(coastline):
     #     svg.add_polygon(poly, stroke_width=0.2, opacity=0.0, layer="coastlines")
 
@@ -275,73 +334,6 @@ for border in borders:
 
     for lineString in lines:
         svg.add_polygon(list(lineString.coords), stroke_width=0.2, opacity=0.0, layer="borders")
-
-
-options = {
-    "stroke_width": 0,
-    "opacity": 0.0,
-    "layer": "bathymetry"
-}
-
-for i in range(0, len(bathymetry32)):
-    b = bathymetry32[i]
-    if not b.is_valid:
-        print("error: polygon {}/{} not valid".format(i, len(bathymetry32)))
-        continue
-    svg.add_polygon(b, **options, hatching="bathymetry_hatching_32")
-
-for i in range(0, len(bathymetry16)):
-    b = bathymetry16[i]
-    if not b.is_valid:
-        print("error: polygon {}/{} not valid".format(i, len(bathymetry16)))
-        continue
-    svg.add_polygon(b, **options, hatching="bathymetry_hatching_16")
-
-for i in range(0, len(bathymetry8)):
-    b = bathymetry8[i]
-    if not b.is_valid:
-        print("error: polygon {}/{} not valid".format(i, len(bathymetry8)))
-        continue
-    svg.add_polygon(b, **options, hatching="bathymetry_hatching_8")
-
-for i in range(0, len(bathymetry4)):
-    b = bathymetry4[i]
-    if not b.is_valid:
-        print("error: polygon {}/{} not valid".format(i, len(bathymetry4)))
-        continue
-    svg.add_polygon(b, **options, hatching="bathymetry_hatching_4")
-
-for i in range(0, len(bathymetry2)):
-    b = bathymetry2[i]
-    if not b.is_valid:
-        print("error: polygon {}/{} not valid".format(i, len(bathymetry2)))
-        continue
-    svg.add_polygon(b, **options, hatching="bathymetry_hatching_2")
-
-
-
-# for s in sea:
-#     lines = []
-
-#     if type(s) is MultiLineString:
-#         for g in s.geoms:
-#             lines.append(list(g.coords))
-#     elif type(s) is LineString:
-#         lines.append(s.coords)
-#     elif type(s) is Polygon:
-#         lines.append(list(s.exterior.coords))
-#         for hole in s.interiors:
-#             lines.append(list(hole.coords))
-#     elif type(s) is MultiPolygon:
-#         for g in s.geoms:
-#             lines.append(list(g.exterior.coords))
-#             for hole in g.interiors:
-#                 lines.append(list(hole.coords))
-#     else:
-#         print("warning: {}".format(type(s)))
-    
-#     for line in lines:
-#         svg.add_polygon(line, stroke_width=0.2, opacity=0.0, layer="borders")
 
 
 print(TIMER_STRING.format("preparing SVG writer", (datetime.now()-timer_start).total_seconds())) 
