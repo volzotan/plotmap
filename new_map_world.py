@@ -29,7 +29,7 @@ MAP_SIZE                        = [2000, 2000] #[2000, 2000] # [210-10, 297-10] 
 
 MAP_SIZE_SCALE                  = maptools.EQUATOR/MAP_SIZE[0]      # increase or decrease MAP_SIZE by factor
 
-SIMPLIFICATION_MAX_ERROR        = 0.5                               # unit in map coordinates (px or mm)
+SIMPLIFICATION_MAX_ERROR        = 1.0 # 0.2                              # unit in map coordinates (px or mm)
 
 THRESHOLD_CITY_POPULATION       = 1000000
 
@@ -37,12 +37,16 @@ CONNECT_DATABASE                = False
 
 DRAW_COASTLINE                  = True
 DRAW_PLACES                     = False
-DRAW_CITIES                     = False
+DRAW_CITIES                     = True
 DRAW_URBAN_AREAS                = False
 DRAW_BORDERS                    = False
 DRAW_ADMIN_REGIONS              = False
-DRAW_BATHYMETRY                 = True
+DRAW_BATHYMETRY                 = False
 DRAW_TERRAIN                    = True
+
+# --------------------------------
+
+CITY_CIRCLE_RADIUS              = 3
 
 """ ------------------------------
 
@@ -65,15 +69,16 @@ svg = SvgWriter("world.svg", MAP_SIZE, background_color="gray")
 print("map size: {:.2f} x {:.2f} meter".format(MAP_SIZE[0]*MAP_SIZE_SCALE, MAP_SIZE[1]*MAP_SIZE_SCALE))
 print("svg size: {:.2f} x {:.2f} units".format(*MAP_SIZE))
 
-svg.add_layer("places")
 svg.add_layer("urban")
 svg.add_layer("borders")
 svg.add_layer("bathymetry")
 svg.add_layer("terrain")
 svg.add_layer("coastlines")
+svg.add_layer("places")
+svg.add_layer("meta")
 
 for i in range(0, 15):
-    svg.add_hatching("bathymetry_hatching_{}".format(i), stroke_width=0.25, distance=1.1**i) #1+0.5*i)
+    svg.add_hatching("bathymetry_hatching_{}".format(i), stroke_width=0.5, distance=1+0.5*i) #1.1**i) #1+0.5*i)
 
 coastlines = []
 places = []
@@ -270,6 +275,58 @@ def load_geometries_from_file(filename):
     with open(filename, "rb") as handle:
         return pickle.load(handle)
 
+def polygons_to_linestrings(polygons):
+
+    linestrings = []
+
+    flat_list = []
+    if len(polygons) > 0 and type(polygons[0]) is list: # polygons is a list of layers
+        for layer in polygons:
+            flat_list += layer
+    else: # polygons is a list of polygons
+        flat_list = polygons
+
+    for poly in flat_list:
+
+        if not poly.is_valid:
+            poly = poly.buffer(0.01)
+
+        outline = poly.boundary
+
+        if type(outline) is MultiLineString:
+            for g in outline.geoms:
+                linestrings.append(g)
+        else:
+            linestrings.append(outline)
+
+    return linestrings
+
+def cut_linestrings_inplace(linestrings, centers):
+
+    circles = []
+    for center in centers:
+        circles.append(center.buffer(CITY_CIRCLE_RADIUS + 3).simplify(SIMPLIFICATION_MAX_ERROR))
+
+    for i in range(0, len(linestrings)):
+
+        if i%10 == 0:
+            print("cut {:10}/{:10} ({:5.2f})".format(i, len(linestrings), (i/len(linestrings))*100), end="\r")
+        
+        poly = linestrings[i]
+        poly = poly.simplify(SIMPLIFICATION_MAX_ERROR)
+        poly_bounds = poly.bounds
+        
+        for circle in circles:    
+
+            if maptools.check_polygons_for_overlap(poly_bounds, circle.bounds):
+                poly = poly.difference(circle)
+        
+        linestrings[i] = poly
+
+    print("") # newline to counter \r
+
+    return linestrings
+
 # ---------------------------------------- COASTLINES / LAND POLYS ----------------------------------------
 
 def load_coastline():
@@ -297,7 +354,7 @@ def load_coastline():
     print(TIMER_STRING.format("transforming coastline data", (datetime.now()-timer_start).total_seconds()))   
 
     timer_start = datetime.now()
-    coastlines, errors_occured, skipped = simplify_polygon(coastlines, min_area=10.0)
+    coastlines, errors_occured, skipped = simplify_polygon(coastlines, min_area=5.0)
 
     print(TIMER_STRING.format("simplifing coastline data ({} errors, {} skipped)".format(errors_occured, skipped), (datetime.now()-timer_start).total_seconds())) 
 
@@ -456,28 +513,13 @@ if DRAW_ADMIN_REGIONS:
 
 # --------------------------------------------------------------------------------
 
-def add_to_writer(polys, hatching_name):
-
-    options = {
-        "stroke_width": 0.2,
-        "opacity": 0.0,
-        "layer": "bathymetry"
-    }
-
-    for i in range(0, len(polys)):
-        p = polys[i]
-        if not p.is_valid:
-            print("error: polygon {}/{} not valid".format(i, len(polys)))
-            continue
-        svg.add_polygon(p, **options, hatching=hatching_name)
-
 def add_layers_to_writer(poly_layers):
 
     options = {
         "stroke_width": 0,
         "opacity": 0,
         "layer": "bathymetry",
-        "stroke": [0, 198, 189]
+        "stroke": [11, 72, 107] # [0, 198, 189]
     }
 
     for layer_i in range(0, len(poly_layers)):
@@ -485,8 +527,8 @@ def add_layers_to_writer(poly_layers):
         polys = poly_layers[layer_i]
         hatching_name = "bathymetry_hatching_{}".format(layer_i)
 
-        if layer_i > 8:
-            options["stroke"] = [11, 72, 107]
+        # if layer_i > 8:
+        #     options["stroke"] = [11, 72, 107]
 
         for i in range(0, len(polys)):
             p = polys[i]
@@ -495,6 +537,12 @@ def add_layers_to_writer(poly_layers):
             if type(p) is MultiPolygon:
                 for g in p.geoms:
                     save_polys.append(g)
+            elif type(p) is GeometryCollection:
+                for g in p.geoms:
+                    if type(g) is Polygon:
+                        save_polys.append(g)
+                    else:
+                        print("encountered unknown geom: {}".format(type(g)))
             else:
                 save_polys.append(p)
 
@@ -563,7 +611,7 @@ def load_bathymetry_file(filename, difference=None):
         data = load_geometries_from_file(cache_file)
         print("loaded from cache: {} [{} layers]".format(filename, len(data)))
     else:
-        data = get_poly_layer_from_geojson(os.path.join(BATHYMETRY_DIRECTORY, filename), latlons_flipped=True, min_area=2.0)
+        data = get_poly_layer_from_geojson(os.path.join(BATHYMETRY_DIRECTORY, filename), latlons_flipped=True, min_area=5.0)
         if difference is not None:
             data = cut_bathymetry_inplace(data, difference)
 
@@ -571,7 +619,6 @@ def load_bathymetry_file(filename, difference=None):
         print("processed and written to cache: {}".format(filename))
 
     return data
-
 
 BATHYMETRY_DIRECTORY = "world_data/gebco_2020_geotiff"
 
@@ -583,13 +630,13 @@ if DRAW_BATHYMETRY:
 
     filenames = [
         "gebco_2020_n0.0_s-90.0_w-90.0_e0.0.",
-        "gebco_2020_n0.0_s-90.0_w-180.0_e-90.0.",
-        "gebco_2020_n0.0_s-90.0_w0.0_e90.0.",
-        "gebco_2020_n0.0_s-90.0_w90.0_e180.0.",
-        "gebco_2020_n90.0_s0.0_w-90.0_e0.0.",
-        "gebco_2020_n90.0_s0.0_w-180.0_e-90.0.",
-        "gebco_2020_n90.0_s0.0_w0.0_e90.0.",
-        "gebco_2020_n90.0_s0.0_w90.0_e180.0."
+        # "gebco_2020_n0.0_s-90.0_w-180.0_e-90.0.",
+        # "gebco_2020_n0.0_s-90.0_w0.0_e90.0.",
+        # "gebco_2020_n0.0_s-90.0_w90.0_e180.0.",
+        # "gebco_2020_n90.0_s0.0_w-90.0_e0.0.",
+        # "gebco_2020_n90.0_s0.0_w-180.0_e-90.0.",
+        # "gebco_2020_n90.0_s0.0_w0.0_e90.0.",
+        # "gebco_2020_n90.0_s0.0_w90.0_e180.0."
     ]
 
     num_layers = 15
@@ -627,9 +674,9 @@ if DRAW_TERRAIN:
 
     filenames = [
         "gebco_2020_n0.0_s-90.0_w-90.0_e0.0.",
-        "gebco_2020_n0.0_s-90.0_w-180.0_e-90.0.",
-        "gebco_2020_n0.0_s-90.0_w0.0_e90.0.",
-        "gebco_2020_n0.0_s-90.0_w90.0_e180.0.",
+        # "gebco_2020_n0.0_s-90.0_w-180.0_e-90.0.",
+        # "gebco_2020_n0.0_s-90.0_w0.0_e90.0.",
+        # "gebco_2020_n0.0_s-90.0_w90.0_e180.0.",
         # "gebco_2020_n90.0_s0.0_w-90.0_e0.0.",
         # "gebco_2020_n90.0_s0.0_w-180.0_e-90.0.",
         # "gebco_2020_n90.0_s0.0_w0.0_e90.0.",
@@ -650,27 +697,56 @@ if DRAW_TERRAIN:
         for i in range(0, len(data)):
             terrain[i] = terrain[i] + data[i]
 
-    print(TIMER_STRING.format("parsing terrain data", (datetime.now()-timer_start).total_seconds()))     
+    print(TIMER_STRING.format("parsing terrain data", (datetime.now()-timer_start).total_seconds()))   
+
+    timer_start = datetime.now()  
+
+    # polygons to linestrings
+    terrain = polygons_to_linestrings(terrain)
+
+    # cutouts for city circles
+    terrain = cut_linestrings_inplace(terrain, cities)
+
+    print(TIMER_STRING.format("converting terrain data", (datetime.now()-timer_start).total_seconds()))  
 
 # --------------------------------------------------------------------------------
 
 timer_start = datetime.now()
 
-for coastline in coastlines:
-    svg.add_polygon(coastline, stroke_width=1.0, opacity=0.0, stroke=[255, 255, 255], layer="coastlines") #, hatching="coastlines_hatching")
-    # for poly in maptools.shapely_polygon_to_list(coastline):
-    #     svg.add_polygon(poly, stroke_width=0.2, opacity=0.0, layer="coastlines")
+# ---
+
+coastlines_line = polygons_to_linestrings(coastlines)
+coastlines_line = cut_linestrings_inplace(coastlines_line, cities)
+for coastline in coastlines_line:
+    lines = []
+
+    if type(coastline) is MultiLineString:
+        for g in coastline.geoms:
+            lines.append(g)
+    else:
+        lines.append(coastline)
+
+    for line in lines:
+        svg.add_poly_line(list(line.coords), stroke_width=1.0, stroke=[255, 255, 255], layer="coastlines")
+
+# ---
 
 for place in places:
     svg.add_circles(list(place.coords), radius=0.5, layer="places")
 
+# ---
+
 for city in cities:
-    svg.add_polygon(city.buffer(1), stroke_width=0.5, stroke=[255, 255, 255], layer="places")
+    svg.add_polygon(city.buffer(CITY_CIRCLE_RADIUS), stroke_width=1.0, opacity=0, stroke=[255, 255, 255], layer="places")
+
+# ---
 
 for u in urban:
     if not u.is_valid:
         continue
     svg.add_polygon(u, stroke_width=0.2, opacity=0.3, stroke=[255, 255, 255], layer="urban")
+
+# ---
 
 # for border in borders:
 #     lines = []
@@ -683,12 +759,15 @@ for u in urban:
 #     for lineString in lines:
 #         svg.add_polygon(list(lineString.coords), stroke_width=0.2, opacity=0.0, layer="borders")
 
-
 for border in borders:
     svg.add_poly_line(list(border.coords), stroke_width=0.6, stroke=[255, 255, 255], layer="borders")
 
+# ---
+
 for a in admin:
     svg.add_poly_line(list(a.coords), stroke_width=0.2, stroke=[255, 255, 255], layer="borders")
+
+# ---
 
 # for i in range(0, len(bathymetry)):
 #     options = {
@@ -703,33 +782,33 @@ for a in admin:
 #         continue
 #     svg.add_polygon(p, **options)
 
-options = {
-    "stroke_width": 0.25,
-    "opacity": 0,
-    "layer": "terrain"
-}
+# ---
 
-for layer in terrain:
-    for i in range(0, len(layer)):
-        p = layer[i]
+for terrain_line in terrain:
+    lines = []
 
-        save_polys = []
-        if type(p) is MultiPolygon:
-            for g in p.geoms:
-                save_polys.append(g)
-        else:
-            save_polys.append(p)
+    if type(terrain_line) is MultiLineString:
+        for g in terrain_line.geoms:
+            lines.append(g)
 
-        for save_poly in save_polys:
-            if not save_poly.is_valid:
-                save_poly = save_poly.buffer(0.01)
-                if not save_poly.is_valid:
-                    print("error: polygon {}/{} not valid".format(i, len(layer)))
-                    continue
-            svg.add_polygon(save_poly, **options)
+    for line in lines:
+        svg.add_poly_line(list(line.coords), stroke_width=0.25, layer="terrain")
 
+# ---
 
 print(TIMER_STRING.format("preparing SVG writer", (datetime.now()-timer_start).total_seconds())) 
+
+# add fiducial
+
+options = {
+    "stroke_width": 1.0,
+    "layer": "meta"
+}
+
+for r in [10, 15, 20]:
+    svg.add_polygon(Point(100, 100).buffer(r), **options, opacity=0)
+svg.add_line([[100, 100-50], [100, 100+50]], **options)
+svg.add_line([[100-50, 100], [100+50, 100]], **options)
 
 svg.save()
 

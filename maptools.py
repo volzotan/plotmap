@@ -367,10 +367,10 @@ def unpack_multipolygons(layer):
     return result
 
 
-def check_polygons_for_overlap(p1, p2):
+def check_polygons_for_overlap(bounds1, bounds2):
 
-    minx1, miny1, maxx1, maxy1 = p1.bounds
-    minx2, miny2, maxx2, maxy2 = p2.bounds
+    minx1, miny1, maxx1, maxy1 = bounds1
+    minx2, miny2, maxx2, maxy2 = bounds2
 
     return minx1 < maxx2 and maxx1 > minx2 and miny1 < maxy2 and maxy1 > miny2
 
