@@ -6,7 +6,7 @@ from shapely.geometry import GeometryCollection, MultiLineString, LineString, Po
 
 class SvgWriter(object):
 
-    def __init__(self, filename, dimensions=None, image=None):
+    def __init__(self, filename, dimensions=None, image=None, background_color=None):
 
         if not filename.endswith(".svg"):
             filename += ".svg"
@@ -14,6 +14,7 @@ class SvgWriter(object):
         self.filename   = filename
         self.dimensions = dimensions
         self.image      = image
+        self.background_color = background_color
 
         self.hatchings          = {}
         self.hatching_options   = {}
@@ -31,14 +32,7 @@ class SvgWriter(object):
         self.layers[layer_id]["poly_lines"] = []
         self.layers[layer_id]["raw"]        = []
 
-    def add_hexagons(self, hexagons, fills, layer="default"):
-        for i in range(0, len(hexagons)):
-            self.layers[layer]["hexagons"].append([
-                Hexbin.create_svg_path(hexagons[i], absolute=True), 
-                [fills[i][0]*255, fills[i][1]*255, fills[i][2]*255, fills[i][3]]
-            ]) 
-
-    def add_circles(self, circles, radius=3, fill=[255, 0, 0], layer="default"):
+    def add_circles(self, circles, radius=3, fill=[255, 0, 0], slayer="default"):
         for item in circles:
             self.layers[layer]["circles"].append([item, radius, fill])
 
@@ -47,7 +41,7 @@ class SvgWriter(object):
         self.layers[layer]["rectangles"].append([*coords, stroke_width, stroke, opacity])
 
     # coords: [[x1, y1], [x2, x2]]
-    def add_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, layer="default"):
+    def add_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, stroke_dasharray=None, layer="default"):
 
         if len(coords) != 2:
             raise Exception("add_line: malformed input data: {}".format(coords))
@@ -56,6 +50,10 @@ class SvgWriter(object):
         options["stroke-width"]     = stroke_width
         options["stroke"]           = stroke
         options["stroke-opacity"]   = stroke_opacity
+
+        if stroke_dasharray is not None:
+            options["stroke-dasharray"] = stroke_dasharray
+
         self.layers[layer]["lines"].append((coords, options))
 
     def add_lines(self, coords, **kwargs):
@@ -83,7 +81,10 @@ class SvgWriter(object):
                 self.layers[layer]["polygons"].append((hole.coords, options))
 
         if hatching is not None:
-            self._add_hatching_for_polygon(poly, hatching)
+            kwargs = {}
+            kwargs["stroke_width"]  = stroke_width
+            kwargs["stroke"]        = stroke
+            self._add_hatching_for_polygon(poly, hatching, kwargs)
 
     def add_poly_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, layer="default"):
         options = {}
@@ -123,17 +124,27 @@ class SvgWriter(object):
 
     # rotation: 45-90 degrees
     # TODO: 0-45 degrees
-    def add_hatching(self, name, rotation=45, distance=2, stroke_width=0.2, stroke_dasharray=None):
+
+    HATCHING_ORIENTATION_45         = 0x01
+    HATCHING_ORIENTATION_45_REV     = 0x02
+    HATCHING_ORIENTATION_VERTICAL   = 0x03
+    HATCHING_ORIENTATION_HORIZONTAL = 0x04
+
+    def add_hatching(self, name, orientation=HATCHING_ORIENTATION_45, distance=2, stroke_width=0.2, stroke_dasharray=None):
         self.hatchings[name] = None
         self.hatching_options[name] = {}
-        self.hatching_options[name]["stroke-width"] = stroke_width
+        self.hatching_options[name]["stroke_width"] = stroke_width
+        self.hatching_options[name]["stroke_dasharray"] = stroke_dasharray
 
-        if stroke_dasharray is not None:
-            self.hatching_options[name]["stroke-dasharray"] = stroke_width
-
-        rot_rad = rotation * math.pi / 180.0
+        # rot_rad = rotation * math.pi / 180.0
 
         num_lines = (self.dimensions[0] + self.dimensions[1])/float(distance)
+
+        if orientation == self.HATCHING_ORIENTATION_HORIZONTAL:
+            num_lines = self.dimensions[1]/float(distance)
+
+        if orientation == self.HATCHING_ORIENTATION_VERTICAL:
+            num_lines = self.dimensions[0]/float(distance)
 
         north = [[0, 0], [self.dimensions[0], 0]]
         south = [[0, self.dimensions[1]], [self.dimensions[0], self.dimensions[1]]]
@@ -143,10 +154,29 @@ class SvgWriter(object):
         hatchlines = []
 
         for i in range(0, int(num_lines)):
-            y = i * distance
-            x = y * math.tan(rot_rad)
 
-            hatching_line = [[0, y], [x, 0]]
+            if orientation == self.HATCHING_ORIENTATION_45:
+                x1 = 0
+                y1 = i * distance
+                x2 = y1 #y1 * math.tan(rot_rad)
+                y2 = 0
+            elif orientation == self.HATCHING_ORIENTATION_45_REV:
+                raise Exception("not implemented yet")
+            elif orientation == self.HATCHING_ORIENTATION_VERTICAL:
+                x1 = i * distance
+                y1 = 0
+                x2 = x1
+                y2 = self.dimensions[1]
+            elif orientation == self.HATCHING_ORIENTATION_HORIZONTAL:
+                x1 = 0
+                y1 = i * distance
+                x2 = self.dimensions[0]
+                y2 = y1
+
+            else:
+                raise Exception("unknown hatching orientation type: {}".format(orientation))
+
+            hatching_line = [[x1, y1], [x2, y2]]
             cropped_line = []
 
             north_intersect = SvgWriter._line_intersection(hatching_line, north)
@@ -169,11 +199,14 @@ class SvgWriter(object):
             if len(cropped_line) == 2:
                 hatchlines.append(LineString(cropped_line))
             elif len(cropped_line) > 2:
-                hatchlines.append(LineString(cropped_line[0:2]))
+                hatchlines.append(LineString([cropped_line[0], cropped_line[2]]))
+
+        if len(hatchlines) == 0:
+            raise Exception("no hatchlines created for {}".format(name))
 
         self.hatchings[name] = MultiLineString(hatchlines)
 
-    def _add_hatching_for_polygon(self, poly, hatching_name):
+    def _add_hatching_for_polygon(self, poly, hatching_name, polygon_options):
 
         hatchlines_in_poly = []
 
@@ -185,11 +218,16 @@ class SvgWriter(object):
         if intersections.is_empty:
             return
 
+        options = {
+            **polygon_options,
+            **self.hatching_options[hatching_name]
+        }
+
         if type(intersections) is LineString:
-            self.add_line(intersections.coords, **self.hatching_options[hatching_name])
+            self.add_line(intersections.coords, **options)
         elif type(intersections) is MultiLineString:
             for line in intersections.geoms:
-                self.add_line(line.coords, **self.hatching_options[hatching_name])
+                self.add_line(line.coords, **options)
         else:
             raise Exception("error: unknown geometry: {}".format(type(intersections)))
 
@@ -216,6 +254,9 @@ class SvgWriter(object):
 
             if self.image is not None:
                 out.write("<image x=\"0\" y=\"0\" xlink:href=\"{}\" />".format(self.image))
+
+            if self.background_color is not None:
+                out.write("<style>svg {{ background-color: {}; }}</style>".format(self.background_color))
 
             for layerid in self.layers.keys():
 
