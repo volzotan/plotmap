@@ -4,25 +4,45 @@ from datetime import datetime
 
 import numpy as np
 
-# SVG_FILENAME = "test.svg"
+SVG_FILENAME = "world.svg"
 # SVG_FILENAME = "dtm/elevation_lines.svg"
-SVG_FILENAME = "dtm/weimar_50m.svg"
+# SVG_FILENAME = "dtm/weimar_50m.svg"
 # SVG_FILENAME = "dtm/thueringen_50m.svg"
 
-TRAVEL_SPEED = 5000
-WRITE_SPEED = 2500
+# FILTER_BY_LAYER = ["coastlines"]
+# FILTER_BY_LAYER = ["coastlines_hatching"]
+# FILTER_BY_LAYER = ["places"]
+# FILTER_BY_LAYER = ["places_circles"]
+FILTER_BY_LAYER = ["bathymetry"]
+# FILTER_BY_LAYER = ["terrain"]
+# FILTER_BY_LAYER = ["meta"]
 
-COMP_TOLERANCE = 0.001
-MIN_LINE_LENGTH = 0.3 # in mm
+OFFSET          = [0, 0] #[-1425, -000]
 
-OUTPUT_FILENAME = "test.gcode"
+# Rotate by 90 degrees
+SIZE            = [1000, 500]
+ROTATE_90       = True
 
-CMD_MOVE = "G1  X{0:.3f} Y{1:.3f}\n"
-CMD_PEN_UP = "G1 Z1 F1000\n"
+TRAVEL_SPEED    = 5000
+WRITE_SPEED     = 4000
+PEN_LIFT_SPEED  = 1000
 
-state_pen_up = True
+COMP_TOLERANCE  = 0.9   #0.001
+MIN_LINE_LENGTH = 0.75 # in mm
 
-OPTIMIZE_ORDER = True
+# for font layers
+# COMP_TOLERANCE  = 0.001
+# MIN_LINE_LENGTH = 0.1 
+
+OUTPUT_FILENAME = "map_layer_{}.gcode".format(FILTER_BY_LAYER[0])
+
+PEN_UP_DISTANCE = 100
+CMD_MOVE        = "G1  X{0:.3f} Y{1:.3f}\n"
+CMD_PEN_UP      = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
+
+state_pen_up    = True
+
+OPTIMIZE_ORDER  = True
 
 tree = ET.parse(SVG_FILENAME)  
 root = tree.getroot()
@@ -95,6 +115,14 @@ def compare_equal(e0, e1):
 all_lines = []
 
 for layer in root.findall("g", root.nsmap):
+
+    if FILTER_BY_LAYER is not None:
+        if layer.attrib["id"] not in FILTER_BY_LAYER:
+            print("skip layer {}".format(layer.attrib["id"]))
+            continue
+
+    print("process layer: {}".format(layer.attrib["id"]))
+
     for child in layer:
         all_lines = all_lines + process(child)
 
@@ -106,6 +134,9 @@ print(" ")
 
 number_of_lines = len(all_lines)
 print("number of lines: {}".format(number_of_lines))
+
+if number_of_lines == 0:
+    exit(0)
 
 # ------------------------------------------------------------------------------------
 # filter duplicates
@@ -302,6 +333,11 @@ print("cleaned unconnected short lines: {0} | short line ratio: {1:.2f}%".format
 
 # print(order_index)
 
+count_pen_up        = 0
+count_pen_down      = 0
+count_draw_moves    = 0
+count_travel_moves  = 0
+
 with open(OUTPUT_FILENAME, "w") as out:
     out.write("G90\n")                          # absolute positioning
     out.write("G21\n")                          # Set Units to Millimeters
@@ -309,6 +345,8 @@ with open(OUTPUT_FILENAME, "w") as out:
     out.write("G1 F{}\n".format(TRAVEL_SPEED))  # Set feedrate to TRAVEL_SPEED mm/min
     state_pen_up = True
     out.write("\n")
+
+    count_pen_up += 1
 
     number_lines = len(ordered_lines)
 
@@ -318,15 +356,29 @@ with open(OUTPUT_FILENAME, "w") as out:
         if (i + 1) < number_lines:
             line_next = ordered_lines[i+1]
 
-        out.write(CMD_MOVE.format(line[0], line[1]))
+        if ROTATE_90:
+            out.write(CMD_MOVE.format(line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + SIZE[0]))
+        else:
+            out.write(CMD_MOVE.format(line[0]+OFFSET[0], line[1]+OFFSET[1]))
 
         # pen down
         if (state_pen_up):
-            out.write("G1 Z0 F1000\n")
+
+            out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
             out.write("G1 F{}\n".format(WRITE_SPEED))
             state_pen_up = False
 
-        out.write(CMD_MOVE.format(line[2], line[3]))  
+            count_travel_moves += 1
+            count_pen_down += 1
+        else:
+            count_draw_moves += 1
+
+        if ROTATE_90:
+            out.write(CMD_MOVE.format(line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + SIZE[0]))
+        else:
+            out.write(CMD_MOVE.format(line[2]+OFFSET[0], line[3]+OFFSET[1]))  
+
+        count_draw_moves += 1
 
         move_pen_up = True
         if line_next is not None:
@@ -339,6 +391,21 @@ with open(OUTPUT_FILENAME, "w") as out:
             out.write("\n")
             state_pen_up = True
 
+            count_pen_up += 1
+
     out.write(CMD_PEN_UP)
     out.write("G1 F{}\n".format(TRAVEL_SPEED))
     out.write("G1  X{} Y{}".format(0, 0))
+
+    count_pen_up += 1
+
+    # Lower pen (will fall down anyway when motor is turned off)
+    out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
+    count_pen_down += 1
+
+
+print("count_pen_up:        {}".format(count_pen_up))
+print("count_pen_down:      {}".format(count_pen_down))
+print("count_draw_moves:    {}".format(count_draw_moves))
+print("count_travel_moves:  {}".format(count_travel_moves))
+print("ratio draw/travel:   {:6.3f}".format(float(count_draw_moves)/float(count_travel_moves)))

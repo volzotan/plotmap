@@ -2,22 +2,27 @@ import math
 from datetime import datetime
 import random
 
-from shapely.geometry import GeometryCollection, MultiLineString, LineString, Polygon, MultiPolygon
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, Polygon, MultiPolygon, Point, MultiPoint
+from shapely.ops import unary_union
 
 class SvgWriter(object):
 
-    def __init__(self, filename, dimensions=None, image=None, background_color=None):
+    def __init__(self, filename, dimensions=None, offset=None, image=None, background_color=None):
 
         if not filename.endswith(".svg"):
             filename += ".svg"
 
         self.filename   = filename
         self.dimensions = dimensions
+        self.offset     = offset
+        if self.offset is None:
+            self.offset = [0, 0]
         self.image      = image
         self.background_color = background_color
 
-        self.hatchings          = {}
-        self.hatching_options   = {}
+        self.hatchings                  = {} # hatchings MultiLineStrings
+        self.hatching_options           = {} # hatchings SVG options (stroke-width, ...)
+        self.hatching_options_meta      = {} # hatchings meta options (distance, orientation, ...)
 
         self.layers     = {}
         self.add_layer("default")
@@ -60,6 +65,7 @@ class SvgWriter(object):
         for coord in coords:
             self.add_line(coord, **kwargs)
 
+    # poly may be Polygon or MultiPolygon
     def add_polygon(self, poly, 
             stroke_width=1, 
             stroke=[0, 0, 0], 
@@ -75,16 +81,27 @@ class SvgWriter(object):
         options["fill"]             = fill
         options["opacity"]          = opacity
 
-        if stroke_width > 0:
-            self.layers[layer]["polygons"].append((poly.exterior.coords, options))
-            for hole in poly.interiors:
-                self.layers[layer]["polygons"].append((hole.coords, options))
+        polys = []
 
-        if hatching is not None:
-            kwargs = {}
-            kwargs["stroke_width"]  = stroke_width
-            kwargs["stroke"]        = stroke
-            self._add_hatching_for_polygon(poly, hatching, kwargs)
+        if type(poly) is Polygon:
+            polys.append(poly)
+        elif type(poly) is MultiPolygon:
+            polys += list(poly.geoms)
+        else:
+            raise Exception("unknown geometry: {}".format(poly))
+
+        for p in polys:
+            if stroke_width > 0:
+                self.layers[layer]["polygons"].append((p.exterior.coords, options))
+                for hole in p.interiors:
+                    self.layers[layer]["polygons"].append((hole.coords, options))
+
+            if hatching is not None:
+                kwargs = {}
+                kwargs["stroke_width"]  = stroke_width
+                kwargs["stroke"]        = stroke
+                kwargs["layer"]         = layer
+                self._add_hatching_for_polygon(p, hatching, kwargs)
 
     def add_poly_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, layer="default"):
         options = {}
@@ -130,48 +147,99 @@ class SvgWriter(object):
     HATCHING_ORIENTATION_VERTICAL   = 0x03
     HATCHING_ORIENTATION_HORIZONTAL = 0x04
 
-    def add_hatching(self, name, orientation=HATCHING_ORIENTATION_45, distance=2, stroke_width=0.2, stroke_dasharray=None):
-        self.hatchings[name] = None
+    def add_hatching(self, name, orientation=HATCHING_ORIENTATION_45, distance=2, bounding_box=None, stroke_width=0.2, stroke_dasharray=None, wiggle=0):
+
         self.hatching_options[name] = {}
         self.hatching_options[name]["stroke_width"] = stroke_width
         self.hatching_options[name]["stroke_dasharray"] = stroke_dasharray
 
-        # rot_rad = rotation * math.pi / 180.0
+        self.hatching_options_meta[name] = {}
+        self.hatching_options_meta[name]["distance"] = distance
+        self.hatching_options_meta[name]["orientation"] = orientation
+        self.hatching_options_meta[name]["wiggle"] = wiggle
 
-        num_lines = (self.dimensions[0] + self.dimensions[1])/float(distance)
+        # new_hatchlines = self._add_hatching(orientation=orientation, distance=distance, wiggle=wiggle, bounding_box=bounding_box)
+
+        # if not name in self.hatchings:
+        #     self.hatchings[name] = new_hatchlines
+        # else:
+        #     all_hatchlines = []
+
+        #     for g in new_hatchlines.geoms:
+        #         all_hatchlines.append(g)
+        #     for g in self.hatchings[name]:
+        #         all_hatchlines.append(g)
+
+        #     self.hatchings[name] = MultiLineString(all_hatchlines)
+
+    def _add_hatching(self, orientation=HATCHING_ORIENTATION_45, distance=2, wiggle=0, bounding_box=None):
+
+        minx, miny, maxx, maxy = 0, 0, self.dimensions[0], self.dimensions[1]
+
+        if bounding_box is not None:
+            minx, miny, maxx, maxy = bounding_box
+            minx = int(minx/distance) * distance
+            miny = int(miny/distance) * distance
+            maxx = (int(maxx/distance) + 1) * distance
+            maxy = (int(maxy/distance) + 1) * distance
+
+        height = maxy-miny
+        width = maxx-minx
+
+        num_lines = (width + height)/float(distance)
 
         if orientation == self.HATCHING_ORIENTATION_HORIZONTAL:
-            num_lines = self.dimensions[1]/float(distance)
+            num_lines = width/float(distance)
 
         if orientation == self.HATCHING_ORIENTATION_VERTICAL:
-            num_lines = self.dimensions[0]/float(distance)
+            num_lines = height/float(distance)
 
-        north = [[0, 0], [self.dimensions[0], 0]]
-        south = [[0, self.dimensions[1]], [self.dimensions[0], self.dimensions[1]]]
-        west  = [[0, 0], [0, self.dimensions[1]]]
-        east  = [[self.dimensions[0], 0], [self.dimensions[0], self.dimensions[1]]]
+        north = [[minx, miny], [maxx, miny]]
+        south = [[minx, maxy], [maxx, maxy]]
+        west  = [[minx, miny], [minx, maxy]]
+        east  = [[maxx, miny], [maxx, maxy]]
 
         hatchlines = []
 
+        wiggle_range = [-wiggle, +wiggle]
+
         for i in range(0, int(num_lines)):
 
+            random_error_1 = 0
+            random_error_2 = 0
+
+            if wiggle > 0:
+                random_error_1 = random.uniform(*wiggle_range)
+                random_error_2 = random.uniform(*wiggle_range)
+
             if orientation == self.HATCHING_ORIENTATION_45:
-                x1 = 0
-                y1 = i * distance
-                x2 = y1 #y1 * math.tan(rot_rad)
-                y2 = 0
+                x1 = minx
+                y1 = miny + i * distance
+                x2 = minx + i * distance
+                y2 = miny
+                y1 += random_error_1
+                x2 += random_error_2
             elif orientation == self.HATCHING_ORIENTATION_45_REV:
-                raise Exception("not implemented yet")
+                x1 = maxx
+                y1 = miny + i * distance
+                x2 = maxx - i * distance
+                y2 = miny
+                y1 += random_error_1
+                x2 += random_error_2
             elif orientation == self.HATCHING_ORIENTATION_VERTICAL:
-                x1 = i * distance
-                y1 = 0
+                x1 = minx + i * distance
+                y1 = miny
                 x2 = x1
-                y2 = self.dimensions[1]
+                y2 = maxy
+                x1 += random_error_1
+                x2 += random_error_2
             elif orientation == self.HATCHING_ORIENTATION_HORIZONTAL:
-                x1 = 0
-                y1 = i * distance
-                x2 = self.dimensions[0]
+                x1 = minx
+                y1 = miny + i * distance
+                x2 = maxx
                 y2 = y1
+                y1 += random_error_1
+                y2 += random_error_2
 
             else:
                 raise Exception("unknown hatching orientation type: {}".format(orientation))
@@ -201,19 +269,22 @@ class SvgWriter(object):
             elif len(cropped_line) > 2:
                 hatchlines.append(LineString([cropped_line[0], cropped_line[2]]))
 
-        if len(hatchlines) == 0:
-            raise Exception("no hatchlines created for {}".format(name))
+        # if len(hatchlines) == 0:
+        #     raise Exception("no hatchlines created for distance {}".format(distance))
 
-        self.hatchings[name] = MultiLineString(hatchlines)
+        return MultiLineString(hatchlines)
 
     def _add_hatching_for_polygon(self, poly, hatching_name, polygon_options):
 
-        hatchlines_in_poly = []
+        hatchlines = []
 
-        if (len(self.hatchings[hatching_name])) <= 0:
+        if (len(self.hatching_options_meta[hatching_name])) <= 0:
             raise Exception("missing hatching: {}".format(hatching_name))
+        
+        # hatchlines = self.hatchings[hatching_name]
+        hatchlines = self._add_hatching(**self.hatching_options_meta[hatching_name], bounding_box=poly.bounds)
 
-        intersections = poly.intersection(self.hatchings[hatching_name])
+        intersections = poly.intersection(hatchlines)
 
         if intersections.is_empty:
             return
@@ -228,6 +299,14 @@ class SvgWriter(object):
         elif type(intersections) is MultiLineString:
             for line in intersections.geoms:
                 self.add_line(line.coords, **options)
+        elif type(intersections) is GeometryCollection:
+            for line in intersections.geoms:
+                if type(line) is LineString:
+                    self.add_line(line.coords, **options)
+                else:
+                    print("unknown sub-geometry: {}".format(line))
+        elif type(intersections) is MultiPoint:
+            return
         else:
             raise Exception("error: unknown geometry: {}".format(type(intersections)))
 
@@ -268,15 +347,23 @@ class SvgWriter(object):
                 out.write("<g inkscape:groupmode=\"layer\" id=\"{0}\" inkscape:label=\"{0}\">".format(layerid))
 
                 for c in layer["circles"]:
-                    out.write("<circle cx=\"{}\" cy=\"{}\" fill=\"rgb({},{},{})\" r=\"{}\" />".format(c[0][0], c[0][1], c[2][0], c[2][1], c[2][2], c[1]))
+                    out.write("<circle cx=\"{}\" cy=\"{}\" fill=\"rgb({},{},{})\" r=\"{}\" />".format(
+                        c[0][0]-self.offset[0], 
+                        c[0][1]-self.offset[1], 
+                        c[2][0], c[2][1], c[2][2], 
+                        c[1]))
 
                 for r in layer["rectangles"]:
-                    out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(*r[0], *r[1], r[2], *r[3], r[4]))
+                    out.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" stroke-width=\"{}\" stroke=\"rgb({},{},{})\" fill-opacity=\"0.0\" stroke-opacity=\"{}\" />".format(
+                        r[0][1]--self.offset[0], r[0][1]-self.offset[1],
+                        *r[1], r[2], *r[3], r[4]))
 
                 for line in layer["lines"]:
                     l = line[0]
                     options = line[1]
-                    out.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" ".format(*l[0], *l[1]))
+                    out.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" ".format(
+                        l[0][0]-self.offset[0], l[0][1]-self.offset[1],
+                        l[1][0]-self.offset[0], l[1][1]-self.offset[1]))
                     out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))
                     out.write("stroke=\"rgb({}, {}, {})\" ".format(*options["stroke"]))
 
@@ -289,12 +376,12 @@ class SvgWriter(object):
                     p = poly[0]
                     options = poly[1]
                     out.write("<path d=\"")
-                    out.write("M{} {} ".format(float(p[0][0]), float(p[0][1])))
+                    out.write("M{} {} ".format(float(p[0][0]-self.offset[0]), float(p[0][1]-self.offset[1])))
                     for point in p[1:]:
                         out.write("L")
-                        out.write(str(float(point[0])))
+                        out.write(str(float(point[0]-self.offset[0])))
                         out.write(" ")
-                        out.write(str(float(point[1])))
+                        out.write(str(float(point[1]-self.offset[1])))
                         out.write(" ")
                     out.write("Z\" ")
                     out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))
@@ -306,12 +393,12 @@ class SvgWriter(object):
                     l = line[0]
                     options = line[1]
                     out.write("<path d=\"")
-                    out.write("M{} {} ".format(float(l[0][0]), float(l[0][1])))
+                    out.write("M{} {} ".format(float(l[0][0]-self.offset[0]), float(l[0][1]-self.offset[1])))
                     for point in l[1:]:
                         out.write("L")
-                        out.write(str(float(point[0])))
+                        out.write(str(float(point[0]-self.offset[0])))
                         out.write(" ")
-                        out.write(str(float(point[1])))
+                        out.write(str(float(point[1]-self.offset[1])))
                         out.write(" ")
                     out.write("\" ")
                     out.write("stroke-width=\"{}\" ".format(options["stroke-width"]))

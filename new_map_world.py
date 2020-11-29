@@ -7,7 +7,6 @@ import maptools
 
 import pickle
 
-import psycopg2
 import shapely
 from shapely.wkb import dumps, loads
 from shapely import ops
@@ -28,23 +27,27 @@ CACHE_DIRECTORY                 = "cache"
 
 MAP_CENTER                      = [0, 0]
 
-MAP_SIZE                        = [2000, 2000] # unit for data: m / unit for SVG elements: px or mm
-VIEWPORT_SIZE                   = [MAP_SIZE[0], 1000]
-VIEWPORT_OFFSET                 = [0, 300]
+# MAP_SIZE                        = [2000, 2000] # unit for data: m / unit for SVG elements: px or mm
+# VIEWPORT_SIZE                   = [MAP_SIZE[0], 1000]
+# VIEWPORT_OFFSET                 = [0, 300]
 
 MAP_SIZE                        = [3300, 3300] # unit for data: m / unit for SVG elements: px or mm
-VIEWPORT_SIZE                   = [MAP_SIZE[0], 2000]
-VIEWPORT_OFFSET                 = [0, 600]
+VIEWPORT_SIZE                   = [1000, 500]
+VIEWPORT_OFFSET                 = [(MAP_SIZE[0]-VIEWPORT_SIZE[0])//2, 900]
+
+# MAP_SIZE                        = [800, 800]
+# VIEWPORT_SIZE                   = MAP_SIZE 
+# VIEWPORT_OFFSET                 = [0, 0] 
 
 MAP_SIZE_SCALE                  = maptools.EQUATOR/MAP_SIZE[0]      # increase or decrease MAP_SIZE by factor
 
-SIMPLIFICATION_MAX_ERROR        = 1.0 # 0.2                              # unit in map coordinates (px or mm)
+SIMPLIFICATION_MAX_ERROR        = 0.1 #1.0 # 0.2                    # unit in map coordinates (px or mm)
 
 THRESHOLD_CITY_POPULATION       = 1000000
 
 CONNECT_DATABASE                = False
 
-FONT_SIZE                       = 3
+FONT_SIZE                       = 5
 
 DRAW_COASTLINE                  = True
 DRAW_PLACES                     = False
@@ -53,12 +56,12 @@ DRAW_CITIES_WTIH_LABELS         = True
 DRAW_URBAN_AREAS                = False
 DRAW_BORDERS                    = False
 DRAW_ADMIN_REGIONS              = False
-DRAW_BATHYMETRY                 = False
+DRAW_BATHYMETRY                 = True
 DRAW_TERRAIN                    = True
 
 # --------------------------------
 
-CITY_CIRCLE_RADIUS              = 3
+CITY_CIRCLE_RADIUS              = 2.0
 
 """ ------------------------------
 
@@ -72,20 +75,23 @@ Natural Earth Shapefiles are encoded in WGS84 (4326)
 timer_total = datetime.now()
 
 if CONNECT_DATABASE:
+    import psycopg2
     conn = psycopg2.connect(database='osm', user='osm')
     curs = conn.cursor()
 
 conv = maptools.Converter(MAP_CENTER, MAP_SIZE, MAP_SIZE_SCALE)
-svg = SvgWriter("world.svg", MAP_SIZE, background_color="gray")
+
+# svg = SvgWriter("world.svg", dimensions=MAP_SIZE, background_color="gray")
+svg = SvgWriter("world.svg", dimensions=VIEWPORT_SIZE, offset=VIEWPORT_OFFSET, background_color="gray")
 
 print("map size: {:.2f} x {:.2f} meter".format(MAP_SIZE[0]*MAP_SIZE_SCALE, MAP_SIZE[1]*MAP_SIZE_SCALE))
 print("svg size: {:.2f} x {:.2f} units".format(*MAP_SIZE))
 
 viewport_polygon = Polygon([
     [VIEWPORT_OFFSET[0],                    VIEWPORT_OFFSET[1]],
-    [VIEWPORT_SIZE[0]-VIEWPORT_OFFSET[0],   VIEWPORT_OFFSET[1]],
-    [VIEWPORT_SIZE[0]-VIEWPORT_OFFSET[0],   VIEWPORT_SIZE[1]+VIEWPORT_OFFSET[1]],
-    [VIEWPORT_OFFSET[0],                    VIEWPORT_SIZE[1]+VIEWPORT_OFFSET[1]]
+    [VIEWPORT_OFFSET[0]+VIEWPORT_SIZE[0],   VIEWPORT_OFFSET[1]],
+    [VIEWPORT_OFFSET[0]+VIEWPORT_SIZE[0],   VIEWPORT_OFFSET[1]+VIEWPORT_SIZE[1]],
+    [VIEWPORT_OFFSET[0],                    VIEWPORT_OFFSET[1]+VIEWPORT_SIZE[1]]
 ])
 
 svg.add_layer("urban")
@@ -93,7 +99,9 @@ svg.add_layer("borders")
 svg.add_layer("bathymetry")
 svg.add_layer("terrain")
 svg.add_layer("coastlines")
+svg.add_layer("coastlines_hatching")
 svg.add_layer("places")
+svg.add_layer("places_circles")
 svg.add_layer("meta")
 
 hfont = HersheyFonts()
@@ -111,7 +119,7 @@ for i in range(0, 15):
     if i < 5:
         distance = 1
     else:
-        distance = 1.1**(i-4)
+        distance = 1.15**(i-4)
 
     svg.add_hatching("bathymetry_hatching_{}".format(i), stroke_width=0.5, distance=distance)
 
@@ -422,19 +430,49 @@ def load_geometries_from_file(filename):
     with open(filename, "rb") as handle:
         return pickle.load(handle)
 
+# returns list of polys
+def _smooth_poly(p, factor):
+
+    p = p.buffer(factor).buffer(-factor)
+
+    if type(p) is Polygon:
+
+        if not p.is_valid:
+            p = p.buffer(0.01)
+
+        return [p]
+    else:
+        res = []
+
+        for g in p.geoms:
+
+            if not g.is_valid:
+                g = g.buffer(0.01)
+
+            res.append(g)
+
+        return res 
+
+
 def _polygons_to_linestrings(polygons):
     linestrings = []
     for poly in polygons:
+
+        subpolys = []
+
         if not poly.is_valid:
-                poly = poly.buffer(0.01)
+            poly = poly.buffer(0.01)
+        subpolys.append(poly)
 
-        outline = poly.boundary
+        for p in subpolys:
 
-        if type(outline) is MultiLineString:
-            for g in outline.geoms:
-                linestrings.append(g)
-        else:
-            linestrings.append(outline)
+            outline = p.boundary
+
+            if type(outline) is MultiLineString:
+                for g in outline.geoms:
+                    linestrings.append(g)
+            else:
+                linestrings.append(outline)
 
     return linestrings
 
@@ -455,6 +493,32 @@ def polygons_to_linestrings(polygons, flatten=True):
         linestrings = _polygons_to_linestrings(polygons)
 
     return linestrings
+
+
+def _unpack_geometrycollection(m):
+
+    polys = []
+
+    if type(m) is GeometryCollection:
+        for g in m.geoms:
+            polys += _unpack_geometrycollection(g)
+    elif type(m) is MultiPolygon:
+        for g in m.geoms:
+            polys += _unpack_geometrycollection(g)
+    elif type(m) is Polygon:
+        polys.append(m)
+    else:
+        print("unknown geometry: {}".format(type(m)))
+
+    return polys
+
+
+
+def polygons_merge_tiles(polys):
+
+    unified_poly = ops.unary_union(polys)
+    return _unpack_geometrycollection(unified_poly)
+
 
 # expects city centers
 # def cut_linestrings_inplace(linestrings, centers):
@@ -676,7 +740,7 @@ if DRAW_CITIES:
 for i in range(0, len(cities)):
     city_pos = cities[i]
     city_name = cities_names[i]
-    svg.add_polygon(city_pos.buffer(CITY_CIRCLE_RADIUS), stroke_width=1.0, opacity=0, stroke=[255, 255, 255], layer="places")
+    svg.add_polygon(city_pos.buffer(CITY_CIRCLE_RADIUS), stroke_width=0.5, opacity=0, stroke=[255, 255, 255], layer="places_circles")
 
     c = list(city_pos.coords)[0]
     # for (x1, y1), (x2, y2) in thefont.lines_for_text(city_name):
@@ -692,7 +756,7 @@ for i in range(0, len(cities)):
     # height = maxy - miny
 
     text_lines = shapely.affinity.scale(text_lines, xfact=1, yfact=-1, origin=Point(0, 0))
-    text_lines = shapely.affinity.translate(text_lines, xoff=c[0]+CITY_CIRCLE_RADIUS*2, yoff=c[1]+3.5)
+    text_lines = shapely.affinity.translate(text_lines, xoff=c[0]+CITY_CIRCLE_RADIUS*2, yoff=c[1]-1.0)
 
     for line in text_lines.geoms:
         l = list(line.coords)
@@ -717,17 +781,18 @@ if DRAW_CITIES_WTIH_LABELS:
         if not type(geom) is Point:
             raise Exception("parsing shapefile: unexpected type: {}".format(geom))
 
-
         # for key in item["properties"]:
         #     print("{} : {}".format(key, item["properties"][key]))
         # exit()
 
         city_pos.append(geom)
-        city_name.append(item["properties"]["asciiname"])
+        city_name.append(item["properties"]["name"]) # label placement computation is done with name, not asciiname
+        # city_name.append(item["properties"]["asciiname"])
 
     for item in fiona.open(LABELS_FILE):
         shapefile_geom = shape(item["geometry"])
         geom = ops.transform(conv.convert_wgs_to_map_list_lon_lat, shapefile_geom)
+        geom = geom.buffer(-1).buffer(+1) # rounded corners
         geom = geom.simplify(SIMPLIFICATION_MAX_ERROR)
 
         if not type(geom) is Polygon:
@@ -737,20 +802,26 @@ if DRAW_CITIES_WTIH_LABELS:
 
     for i in range(0, len(city_name)):
 
-        svg.add_polygon(city_pos[i].buffer(CITY_CIRCLE_RADIUS), stroke_width=1.0, opacity=0, stroke=[255, 255, 255], layer="places")
+        if not viewport_polygon.contains(city_pos[i]):
+            continue
+
+        svg.add_polygon(city_pos[i].buffer(CITY_CIRCLE_RADIUS), stroke_width=0.5, opacity=0, stroke=[255, 255, 255], layer="places_circles")
         # svg.add_polygon(city_label[i], stroke_width=0.5, opacity=0, stroke=[0, 0, 0], layer="places")
 
         minx, _, _, maxy = city_label[i].bounds
         c = [minx, maxy]
         text_lines = get_text(hfont, city_name[i])
         text_lines = shapely.affinity.scale(text_lines, xfact=1, yfact=-1, origin=Point(0, 0))
-        text_lines = shapely.affinity.translate(text_lines, xoff=c[0]+CITY_CIRCLE_RADIUS*2, yoff=c[1]-1.0)
+        text_lines = shapely.affinity.translate(text_lines, xoff=c[0]+CITY_CIRCLE_RADIUS-0.75, yoff=c[1]+0.4)
 
         for line in text_lines.geoms:
             l = list(line.coords)
+            if not viewport_polygon.contains(Point(l[0])) or not viewport_polygon.contains(Point(l[1])):
+                continue
+
             svg.add_line(l, layer="places")
 
-        exclusion_zones.append(city_pos[i].buffer(CITY_CIRCLE_RADIUS + 1))
+        exclusion_zones.append(city_pos[i].buffer(CITY_CIRCLE_RADIUS + 2))
         exclusion_zones.append(city_label[i].buffer(1))
 
     exclusion_zones = recalculate_exclusion_zones(exclusion_zones)
@@ -786,6 +857,7 @@ if DRAW_URBAN_AREAS:
             urban.append(poly.buffer(1.0).buffer(1.0))
 
     print(TIMER_STRING.format("postprocessing urban areas data", (datetime.now()-timer_start).total_seconds())) 
+
 # --------------------------------------------------------------------------------
 
 if DRAW_BORDERS:
@@ -814,10 +886,10 @@ if DRAW_ADMIN_REGIONS:
 
 # --------------------------------------------------------------------------------
 
-def add_layers_to_writer(poly_layers):
+def add_layers_to_writer(poly_layers, cut_polys=[]):
 
     options = {
-        "stroke_width": 0, #0.5,
+        "stroke_width": 0, #0.5
         "opacity": 0,
         "layer": "bathymetry",
         "stroke": [11, 72, 107] # [0, 198, 189]
@@ -835,9 +907,15 @@ def add_layers_to_writer(poly_layers):
 
             print("\33[2K   adding layer {}/{} | poly {}/{}".format(layer_i, len(poly_layers), i, len(polys)), end="\r")
 
-            save_polys = validate_polygon(polys[i])
+            p = polys[i]
+
+            for cut_poly in cut_polys:
+                p = p.difference(cut_poly)
+
+            save_polys = validate_polygon(p)
 
             for save_poly in save_polys:
+                
                 save_poly = save_poly.intersection(viewport_polygon)
       
                 for poly in validate_polygon(save_poly):
@@ -974,7 +1052,7 @@ if DRAW_BATHYMETRY:
     print(TIMER_STRING.format("parsing sea data", (datetime.now()-timer_start).total_seconds()))     
     timer_start = datetime.now()
 
-    add_layers_to_writer(bathymetry)
+    add_layers_to_writer(bathymetry, exclusion_zones)
 
     print(TIMER_STRING.format("preparing sea data", (datetime.now()-timer_start).total_seconds()))  
 
@@ -1076,6 +1154,16 @@ if DRAW_TERRAIN:
     print(TIMER_STRING.format("parsing terrain data", (datetime.now()-timer_start).total_seconds()))     
     timer_start = datetime.now()  
 
+    for i in range(0, len(terrain)):
+
+        # Expand every polygon by a bit so polygon merging (to remove tile-borders) works
+        # at the same time this smoothes the rather rough lines a bit
+
+        for j in range(0, len(terrain[i])):
+            terrain[i][j] = terrain[i][j].buffer(+1.0).buffer(-0.8)
+
+        terrain[i] = polygons_merge_tiles(terrain[i])
+
     # polygons to linestrings
     terrain = polygons_to_linestrings(terrain, flatten=False)
 
@@ -1113,7 +1201,7 @@ for poly in coastlines_extended:
     if type(poly) not in [Polygon, MultiPolygon]:
         print("warning: unknown geometry: {}".format(poly))
         continue
-    svg.add_polygon(poly, stroke_width=0, hatching="coastline_hatching", layer="coastlines")
+    svg.add_polygon(poly, stroke_width=0, hatching="coastline_hatching", layer="coastlines_hatching")
 
 coastlines_line = polygons_to_linestrings(coastlines)
 coastlines_line = cut_linestrings(coastlines_line, exclusion_zones)
@@ -1195,7 +1283,7 @@ for i in range(0, len(terrain)):
         lines = validate_linestring(terrain_line)
 
         for line in lines:
-            svg.add_poly_line(list(line.coords), stroke=[color, color, color], stroke_width=0.25, layer="terrain")
+            svg.add_poly_line(list(line.coords), stroke=[color, color, color], stroke_width=0.5, layer="terrain")
 
 # ---
 
@@ -1208,14 +1296,14 @@ options = {
     "layer": "meta"
 }
 
-rose_center = [100, VIEWPORT_OFFSET[1]+100]
+ROSE_OFFSET = [0, 0]
+rose_center = [VIEWPORT_OFFSET[0] + ROSE_OFFSET[0], VIEWPORT_OFFSET[1] + VIEWPORT_SIZE[1] - ROSE_OFFSET[1]] # GCODE coordinate system is bottom-left
 
-for r in [10, 15, 20]:
+for r in [5, 10, 15]:
     svg.add_polygon(Point(rose_center).buffer(r), **options, opacity=0)
-svg.add_line([[rose_center[0], rose_center[1]-50], [rose_center[0], rose_center[1]+50]], **options)
-svg.add_line([[rose_center[0]-50, rose_center[1]], [rose_center[0]+50, rose_center[1]]], **options)
-
-svg.add_polygon(viewport_polygon, opacity=0, stroke_width=2, layer="meta")
+svg.add_line([[rose_center[0], rose_center[1]-20], [rose_center[0], rose_center[1]+20]], **options)
+svg.add_line([[rose_center[0]-20, rose_center[1]], [rose_center[0]+20, rose_center[1]]], **options)
+# svg.add_polygon(viewport_polygon, opacity=0, stroke_width=2, layer="meta")
 
 # ---
 
