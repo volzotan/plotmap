@@ -1,6 +1,8 @@
 import lxml.etree as ET
 import math
 from datetime import datetime
+import sys
+import argparse
 
 import numpy as np
 
@@ -13,14 +15,15 @@ SVG_FILENAME = "world.svg"
 # FILTER_BY_LAYER = ["coastlines_hatching"]
 # FILTER_BY_LAYER = ["places"]
 # FILTER_BY_LAYER = ["places_circles"]
-FILTER_BY_LAYER = ["bathymetry"]
+# FILTER_BY_LAYER = ["bathymetry"]
 # FILTER_BY_LAYER = ["terrain"]
 # FILTER_BY_LAYER = ["meta"]
 
 OFFSET          = [0, 0] #[-1425, -000]
 
+MAX_LENGTH_SEGMENT = 8 # in m 
+
 # Rotate by 90 degrees
-SIZE            = [1000, 500]
 ROTATE_90       = True
 
 TRAVEL_SPEED    = 5000
@@ -34,9 +37,8 @@ MIN_LINE_LENGTH = 0.75 # in mm
 # COMP_TOLERANCE  = 0.001
 # MIN_LINE_LENGTH = 0.1 
 
-OUTPUT_FILENAME = "map_layer_{}.gcode".format(FILTER_BY_LAYER[0])
 
-PEN_UP_DISTANCE = 100
+PEN_UP_DISTANCE = 1
 CMD_MOVE        = "G1  X{0:.3f} Y{1:.3f}\n"
 CMD_PEN_UP      = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
 
@@ -112,12 +114,59 @@ def compare_equal(e0, e1):
     return False
 
 
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument(
+    "--max-length-segment", 
+    type=int,
+    default=MAX_LENGTH_SEGMENT,
+    help="maximum length of segment [m]"
+)
+
+
+parser.add_argument(
+    "--filter-by-layer", 
+    type=str,
+    default=None,
+    help="layername"
+)
+
+args = parser.parse_args()
+
+args.max_length_segment *= 100*10 # m to mm 
+
+OUTPUT_FILENAME = "map_layer_{}".format(args.filter_by_layer)
+
+height = root.get("height")
+width = root.get("width")
+
+if height.endswith("px") or height.endswith("mm"):
+    height = height[:-2]
+
+height = int(height)
+
+if width.endswith("px") or height.endswith("mm"):
+    width = width[:-2]
+
+width = int(width)
+
+if height is None or height <= 0:
+    print("SVG height attribute not correct (value: {})".format(height))
+    exit(-1)
+
+if width is None or width <= 0:
+    print("SVG width attribute not correct (value: {})".format(width))
+    exit(-1)
+
+SIZE = [width, height]
+
 all_lines = []
 
 for layer in root.findall("g", root.nsmap):
 
-    if FILTER_BY_LAYER is not None:
-        if layer.attrib["id"] not in FILTER_BY_LAYER:
+    if args.filter_by_layer is not None:
+        if layer.attrib["id"] != args.filter_by_layer:
             print("skip layer {}".format(layer.attrib["id"]))
             continue
 
@@ -162,7 +211,7 @@ nplines = unique
 # ------------------------------------------------------------------------------------
 # mirror along x axis to transfer SVG coordinate system (0 top left) to gcode (0 bottom left)
 
-maxy = np.max([np.max(nplines[:, 1]), np.max(nplines[:, 3])])
+maxy = SIZE[1] #np.max([np.max(nplines[:, 1]), np.max(nplines[:, 3])])
 
 nplines[:, 1] = np.multiply(nplines[:, 1], -1)
 nplines[:, 3] = np.multiply(nplines[:, 3], -1)
@@ -333,75 +382,101 @@ print("cleaned unconnected short lines: {0} | short line ratio: {1:.2f}%".format
 
 # print(order_index)
 
+segments = [[]]
+number_lines = len(ordered_lines)
+total_length_segment = 0
+for i in range(0, number_lines):
+    dist = math.sqrt(
+        (ordered_lines[i][2]-ordered_lines[i][0])**2 + (ordered_lines[i][3]-ordered_lines[i][1])**2
+    )
+
+    if (dist + total_length_segment) > args.max_length_segment:
+        segments.append([])
+        print("new segment          [{:5.2f}m]".format(total_length_segment/1000))
+        total_length_segment = 0
+    else:
+        total_length_segment += dist
+
+    segments[-1].append(ordered_lines[i])
+
+print("last segment         [{:5.2f}m]".format(total_length_segment/1000))
+
 count_pen_up        = 0
 count_pen_down      = 0
 count_draw_moves    = 0
 count_travel_moves  = 0
 
-with open(OUTPUT_FILENAME, "w") as out:
-    out.write("G90\n")                          # absolute positioning
-    out.write("G21\n")                          # Set Units to Millimeters
-    out.write(CMD_PEN_UP)                       # move pen up
-    out.write("G1 F{}\n".format(TRAVEL_SPEED))  # Set feedrate to TRAVEL_SPEED mm/min
-    state_pen_up = True
-    out.write("\n")
+for s in range(0, len(segments)):
 
-    count_pen_up += 1
+    segment = segments[s]
+    filename = OUTPUT_FILENAME + "_{}of{}.gcode".format(s+1, len(segments))
 
-    number_lines = len(ordered_lines)
+    with open(filename, "w") as out:
+        out.write("G90\n")                          # absolute positioning
+        out.write("G21\n")                          # Set Units to Millimeters
+        out.write(CMD_PEN_UP)                       # move pen up
+        out.write("G1 F{}\n".format(TRAVEL_SPEED))  # Set feedrate to TRAVEL_SPEED mm/min
+        state_pen_up = True
+        out.write("\n")
 
-    for i in range(0, number_lines):
-        line = ordered_lines[i]
-        line_next = None
-        if (i + 1) < number_lines:
-            line_next = ordered_lines[i+1]
+        count_pen_up += 1
 
-        if ROTATE_90:
-            out.write(CMD_MOVE.format(line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + SIZE[0]))
-        else:
-            out.write(CMD_MOVE.format(line[0]+OFFSET[0], line[1]+OFFSET[1]))
+        number_lines = len(segment)
 
-        # pen down
-        if (state_pen_up):
+        for i in range(0, number_lines):
+            line = segment[i]
+            line_next = None
+            if (i + 1) < number_lines:
+                line_next = segment[i+1]
 
-            out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
-            out.write("G1 F{}\n".format(WRITE_SPEED))
-            state_pen_up = False
+            if ROTATE_90:
+                out.write(CMD_MOVE.format(line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + SIZE[0]))
+            else:
+                out.write(CMD_MOVE.format(line[0]+OFFSET[0], line[1]+OFFSET[1]))
 
-            count_travel_moves += 1
-            count_pen_down += 1
-        else:
+            # pen down
+            if (state_pen_up):
+
+                out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
+                out.write("G1 F{}\n".format(WRITE_SPEED))
+                state_pen_up = False
+
+                count_travel_moves += 1
+                count_pen_down += 1
+            else:
+                count_draw_moves += 1
+
+            if ROTATE_90:
+                out.write(CMD_MOVE.format(line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + SIZE[0]))
+            else:
+                out.write(CMD_MOVE.format(line[2]+OFFSET[0], line[3]+OFFSET[1]))  
+
             count_draw_moves += 1
 
-        if ROTATE_90:
-            out.write(CMD_MOVE.format(line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + SIZE[0]))
-        else:
-            out.write(CMD_MOVE.format(line[2]+OFFSET[0], line[3]+OFFSET[1]))  
+            move_pen_up = True
+            if line_next is not None:
+                if math.isclose(line[2], line_next[0], abs_tol=COMP_TOLERANCE):
+                    if math.isclose(line[3], line_next[1], abs_tol=COMP_TOLERANCE):
+                        move_pen_up = False
+            if move_pen_up:
+                out.write(CMD_PEN_UP)  
+                out.write("G1 F{}\n".format(TRAVEL_SPEED))
+                out.write("\n")
+                state_pen_up = True
 
-        count_draw_moves += 1
+                count_pen_up += 1
 
-        move_pen_up = True
-        if line_next is not None:
-            if math.isclose(line[2], line_next[0], abs_tol=COMP_TOLERANCE):
-                if math.isclose(line[3], line_next[1], abs_tol=COMP_TOLERANCE):
-                    move_pen_up = False
-        if move_pen_up:
-            out.write(CMD_PEN_UP)  
-            out.write("G1 F{}\n".format(TRAVEL_SPEED))
-            out.write("\n")
-            state_pen_up = True
+        out.write(CMD_PEN_UP)
+        out.write("G1 F{}\n".format(TRAVEL_SPEED))
+        out.write("G1 X{} Y{}\n".format(0, 0))
 
-            count_pen_up += 1
+        count_pen_up += 1
 
-    out.write(CMD_PEN_UP)
-    out.write("G1 F{}\n".format(TRAVEL_SPEED))
-    out.write("G1  X{} Y{}".format(0, 0))
+        # Lower pen (will fall down anyway when motor is turned off)
+        # out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
+        # count_pen_down += 1
 
-    count_pen_up += 1
-
-    # Lower pen (will fall down anyway when motor is turned off)
-    out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
-    count_pen_down += 1
+    print("write segment {}/{}: {}".format(s+1, len(segments), filename))
 
 
 print("count_pen_up:        {}".format(count_pen_up))
