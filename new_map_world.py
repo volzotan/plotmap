@@ -32,7 +32,7 @@ MAP_CENTER                      = [0, 0]
 # VIEWPORT_OFFSET                 = [0, 300]
 
 MAP_SIZE                        = [3300, 3300] # unit for data: m / unit for SVG elements: px or mm
-VIEWPORT_SIZE                   = [1000, 500]
+VIEWPORT_SIZE                   = [800, 500]
 VIEWPORT_OFFSET                 = [(MAP_SIZE[0]-VIEWPORT_SIZE[0])//2, 900]
 
 # MAP_SIZE                        = [800, 800]
@@ -658,6 +658,29 @@ def validate_linestring(line):
         return lines
     else:
         return [l]
+
+# --------------------------------------------------------------------------------
+
+# add fiducial
+
+options = {
+    "stroke_width": 1.0,
+    "layer": "meta"
+}
+
+ROSE_OFFSET = [0, 0]
+rose_center = [VIEWPORT_OFFSET[0] + VIEWPORT_SIZE[0] + ROSE_OFFSET[0], VIEWPORT_OFFSET[1] + VIEWPORT_SIZE[1] - ROSE_OFFSET[1]] # GCODE coordinate system is bottom-left
+
+exclusion_zones.append(Point(rose_center).buffer(15+2))
+exclusion_zones.append(LineString([(rose_center[0], rose_center[1]-20), (rose_center[0], rose_center[1]+20)]).buffer(2))
+exclusion_zones.append(LineString([(rose_center[0]-20, rose_center[1]), (rose_center[0]+20, rose_center[1])]).buffer(2))
+
+for r in [5, 10, 15]:
+    svg.add_polygon(Point(rose_center).buffer(r), **options, opacity=0)
+svg.add_line([[rose_center[0], rose_center[1]-20], [rose_center[0], rose_center[1]+20]], **options)
+svg.add_line([[rose_center[0]-20, rose_center[1]], [rose_center[0]+20, rose_center[1]]], **options)
+# svg.add_polygon(viewport_polygon, opacity=0, stroke_width=2, layer="meta")
+
 
 # --------------------------------------------------------------------------------
 
@@ -1288,22 +1311,6 @@ for i in range(0, len(terrain)):
 # ---
 
 print(TIMER_STRING.format("preparing SVG writer", (datetime.now()-timer_start).total_seconds())) 
-
-# add fiducial
-
-options = {
-    "stroke_width": 1.0,
-    "layer": "meta"
-}
-
-ROSE_OFFSET = [0, 0]
-rose_center = [VIEWPORT_OFFSET[0] + ROSE_OFFSET[0], VIEWPORT_OFFSET[1] + VIEWPORT_SIZE[1] - ROSE_OFFSET[1]] # GCODE coordinate system is bottom-left
-
-for r in [5, 10, 15]:
-    svg.add_polygon(Point(rose_center).buffer(r), **options, opacity=0)
-svg.add_line([[rose_center[0], rose_center[1]-20], [rose_center[0], rose_center[1]+20]], **options)
-svg.add_line([[rose_center[0]-20, rose_center[1]], [rose_center[0]+20, rose_center[1]]], **options)
-# svg.add_polygon(viewport_polygon, opacity=0, stroke_width=2, layer="meta")
 
 # ---
 
