@@ -17,6 +17,12 @@ EQUATOR_HALF = EQUATOR / 2.0
 
 class Converter(object):
 
+    # map center = lat lon
+    # map size = viewport in document units interpreted as meter for map
+    # map size scale = scaling factor for viewport (200mm page results in 200m map, scale 10x --> 2km map)
+
+    # scaling is applied once to map_size and inverted during conversion output operations
+
     def __init__(self, map_center, map_size, map_size_scale):
         self.map_center_lat_lon = map_center
 
@@ -25,18 +31,18 @@ class Converter(object):
         self.map_center_m[0] *= EQUATOR
         self.map_center_m[1] *= EQUATOR
 
-        self.map_size = map_size
-        self.map_left = self.map_center_m[0] - self.map_size[0]/2.0
-        self.map_top = self.map_center_m[1] - self.map_size[1]/2.0
-
         self.map_size_scale = map_size_scale
+
+        self.map_size = [map_size[0] * self.map_size_scale, map_size[1] * self.map_size_scale]
+        self.map_left = self.map_center_m[0] - (self.map_size[0])/2.0
+        self.map_top = self.map_center_m[1] - (self.map_size[1])/2.0
 
     def get_bounding_box(self): # in web mercator, i.e. meters
         return [
-            self.map_center_m[0] - EQUATOR_HALF - (self.map_size[0] * map_size_scale)/2.0, 
-            (self.map_center_m[1]  - EQUATOR_HALF) * -1 - (self.map_size[1] * map_size_scale)/2.0,
-            self.map_center_m[0] - EQUATOR_HALF + (self.map_size[0] * map_size_scale)/2.0, 
-            (self.map_center_m[1]  - EQUATOR_HALF) * -1  + (self.map_size[1] * map_size_scale)/2.0,
+            self.map_center_m[0] - EQUATOR_HALF - self.map_size[0]/2.0, 
+            (self.map_center_m[1]  - EQUATOR_HALF) * -1 - self.map_size[1]/2.0,
+            self.map_center_m[0] - EQUATOR_HALF + self.map_size[0]/2.0, 
+            (self.map_center_m[1]  - EQUATOR_HALF) * -1  + self.map_size[1]/2.0,
         ]
 
     # convert WGS84 (lat, lon) to (-1, 1) in WebMercator
@@ -61,18 +67,18 @@ class Converter(object):
 
         return [x, y]
 
-    # convert WebMercator (meter) to (px) in map
+    # convert WebMercator (meter) to unscaled (px) in map
     def convert_mercator_to_map(self, x, y):
-        mapx = (x + EQUATOR_HALF) / self.map_size_scale
-        mapy = ((y - EQUATOR_HALF) * -1) / self.map_size_scale
+        mapx = (x + EQUATOR_HALF) - self.map_left
+        mapy = ((y - EQUATOR_HALF) * -1) - self.map_top
 
-        return mapx, mapy
+        return mapx/self.map_size_scale, mapy/self.map_size_scale
 
-    # convert WGS84 (lat, lon) to (px) in map
+    # convert WGS84 (lat, lon) to unscaled (px) in map
     def convert_wgs_to_map(self, lat, lon):
         x, y = self.convert_wgs_to_mercator(lat, lon) # results in values in the range of -1 to 1
-        x = x * self.map_size[0]
-        y = y * self.map_size[1]
+        x = (x * self.map_size[0]) / self.map_size_scale
+        y = (y * self.map_size[1]) / self.map_size_scale
         return x, y
 
     def convert_mercator_to_map_list(self, xs, ys):
@@ -80,7 +86,7 @@ class Converter(object):
         mapys = []
 
         for i in range(0, len(xs)):
-            mapx, mapy = self.convert_mercator_to_map(xs[i], ys[i])
+            mapx, mapy = self.convert_mercator_to_map(xs[i], ys[i]) 
             mapxs.append(mapx)
             mapys.append(mapy)
 
