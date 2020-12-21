@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 
 SVG_FILENAME = "world.svg"
+# SVG_FILENAME = "map_hauke.svg"
 # SVG_FILENAME = "dtm/elevation_lines.svg"
 # SVG_FILENAME = "dtm/weimar_50m.svg"
 # SVG_FILENAME = "dtm/thueringen_50m.svg"
@@ -24,7 +25,7 @@ OFFSET          = [0, 0] #[-1425, -000]
 MAX_LENGTH_SEGMENT = 8 # in m 
 
 # Rotate by 90 degrees
-ROTATE_90       = True
+ROTATE_90       = False
 
 TRAVEL_SPEED    = 5000
 WRITE_SPEED     = 4000
@@ -36,7 +37,6 @@ MIN_LINE_LENGTH = 0.75 # in mm
 # for font layers
 # COMP_TOLERANCE  = 0.001
 # MIN_LINE_LENGTH = 0.1 
-
 
 PEN_UP_DISTANCE = 1
 CMD_MOVE        = "G1  X{0:.3f} Y{1:.3f}\n"
@@ -124,12 +124,17 @@ parser.add_argument(
     help="maximum length of segment [m]"
 )
 
-
 parser.add_argument(
     "--filter-by-layer", 
     type=str,
     default=None,
     help="layername"
+)
+
+parser.add_argument(
+    "--high-precision", 
+    action="store_true",
+    help="high precision mode"
 )
 
 args = parser.parse_args()
@@ -158,6 +163,11 @@ if height is None or height <= 0:
 if width is None or width <= 0:
     print("SVG width attribute not correct (value: {})".format(width))
     exit(-1)
+
+if args.high_precision:
+    print("set to high precision mode")
+    COMP_TOLRANCE  = 0.001
+    MIN_LINE_LENGTH = 0.1 
 
 SIZE = [width, height]
 
@@ -409,7 +419,7 @@ count_travel_moves  = 0
 for s in range(0, len(segments)):
 
     segment = segments[s]
-    filename = OUTPUT_FILENAME + "_{}of{}.gcode".format(s+1, len(segments))
+    filename = OUTPUT_FILENAME + "_{}of{}.nc".format(s+1, len(segments))
 
     with open(filename, "w") as out:
         out.write("G90\n")                          # absolute positioning

@@ -43,7 +43,7 @@ DATASET_FILES = [
 
 MIN_VAUE            = 0
 MAX_VALUE           = 9000
-NUM_ELEVATION_LINES = 90
+NUM_ELEVATION_LINES = 30
 
 MIN_AREA                    = 4 # in square-pixel
 MAX_SIMPLIFICATION_ERROR    = 0.1 # in px
@@ -94,6 +94,36 @@ def get_holes_for_poly(contours, hierarchy, index):
         
     return holes
 
+
+
+layer_min_max = []
+
+# equal elevation distances
+# elevation_line_height = abs((MAX_VALUE - MIN_VAUE) / NUM_ELEVATION_LINES)
+# for i in range(0, NUM_ELEVATION_LINES):
+#     threshold_value_low = MIN_VAUE + elevation_line_height*i
+#     threshold_value_high = threshold_value_low + elevation_line_height
+#     layer_min_max.append([threshold_value_low, threshold_value_high])
+
+splits = [MIN_VAUE, 1000, 3000, MAX_VALUE]
+num_splits = len(splits)-1
+
+for i in range(0, num_splits):
+    elevation_line_height = abs((splits[i+1] - splits[i]) / (NUM_ELEVATION_LINES/num_splits))
+    for j in range(0, NUM_ELEVATION_LINES//num_splits):
+        threshold_value_low = splits[i] + elevation_line_height*j
+        threshold_value_high = threshold_value_low + elevation_line_height
+        layer_min_max.append([threshold_value_low, threshold_value_high])    
+
+print("elevation contour lines:")
+for item in layer_min_max:
+    print("{:6.0f} {:6.0f}".format(*item))
+
+if not len(layer_min_max) == NUM_ELEVATION_LINES:
+    print("NUM_ELEVATION_LINES is not conforming!")
+    exit(-1)
+
+
 for DATASET_FILE in DATASET_FILES:
 
     GEOJSON_FILE = os.path.join(BASE_DIR, DATASET_FILE[:-4] + ".{}_{}_{}".format(MIN_VAUE, MAX_VALUE, NUM_ELEVATION_LINES) + ".geojson")
@@ -116,16 +146,14 @@ for DATASET_FILE in DATASET_FILES:
 
         print("min: {} | max: {}".format(min_elevation, max_elevation))
 
-        elevation_line_height = abs((MAX_VALUE - MIN_VAUE) / NUM_ELEVATION_LINES)
-
         contour_layers = []
 
-        for i in range(0, NUM_ELEVATION_LINES):
+        for i in range(0, len(layer_min_max)):
 
-            threshold_value_low = MIN_VAUE + elevation_line_height*i
-            threshold_value_high = threshold_value_low + elevation_line_height
+            threshold_value_low = layer_min_max[i][0]
+            threshold_value_high = layer_min_max[i][1]
 
-            print("elevation line {}: {} -> {}".format(i, threshold_value_low, threshold_value_high))
+            print("elevation line {}: {:7.2f} -> {:7.2f}".format(i, threshold_value_low, threshold_value_high))
 
             _, bin_band_lower = cv2.threshold(band, threshold_value_low, max_elevation, cv2.THRESH_BINARY)
             

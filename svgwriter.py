@@ -46,7 +46,7 @@ class SvgWriter(object):
         self.layers[layer]["rectangles"].append([*coords, stroke_width, stroke, opacity])
 
     # coords: [[x1, y1], [x2, x2]]
-    def add_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, stroke_dasharray=None, layer="default"):
+    def add_line(self, coords, stroke_width=1, stroke=[0, 0, 0], stroke_opacity=1.0, stroke_dasharray=None, opacity=None, layer="default"):
 
         if len(coords) != 2:
             raise Exception("add_line: malformed input data: {}".format(coords))
@@ -55,6 +55,9 @@ class SvgWriter(object):
         options["stroke-width"]     = stroke_width
         options["stroke"]           = stroke
         options["stroke-opacity"]   = stroke_opacity
+
+        # parameter opacity is ignored and only exists to ensure compatibility with the polygon functions
+        # (so the same options hashmap can be used on all of these functions)
 
         if stroke_dasharray is not None:
             options["stroke-dasharray"] = stroke_dasharray
@@ -147,11 +150,12 @@ class SvgWriter(object):
     HATCHING_ORIENTATION_VERTICAL   = 0x03
     HATCHING_ORIENTATION_HORIZONTAL = 0x04
 
-    def add_hatching(self, name, orientation=HATCHING_ORIENTATION_45, distance=2, bounding_box=None, stroke_width=0.2, stroke_dasharray=None, wiggle=0):
+    def add_hatching(self, name, orientation=HATCHING_ORIENTATION_45, distance=2, bounding_box=None, stroke_width=0.2, stroke_dasharray=None, stroke_opacity=1.0, wiggle=0):
 
         self.hatching_options[name] = {}
         self.hatching_options[name]["stroke_width"] = stroke_width
         self.hatching_options[name]["stroke_dasharray"] = stroke_dasharray
+        self.hatching_options[name]["stroke_opacity"] = stroke_opacity
 
         self.hatching_options_meta[name] = {}
         self.hatching_options_meta[name]["distance"] = distance
