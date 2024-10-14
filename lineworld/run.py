@@ -1,20 +1,17 @@
 import datetime
 
 from loguru import logger
-from shapely.geometry import Polygon
 from sqlalchemy import create_engine
 
 from core import maptools
 from layers import bathymetry, contour
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.layers import coastlines, grid
-from lineworld.layers.coastlines import LandPolygon
 
 from shapely.geometry import MultiPolygon
 
 import cProfile as profile
 
-from lineworld.util.scales import Colorscale
 
 if __name__ == "__main__":
 

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from shapely import Geometry, GeometryCollection, MultiLineString, LineString, Polygon
+from shapely import Geometry, MultiLineString, LineString, Polygon
 
 
 class SvgWriter():
@@ -99,7 +99,7 @@ class SvgWriter():
                 out.write(f"#{style_selector} {{\n")
                 for k, v in style_attributes.items():
                     out.write(f"\t{k}: {v};\n")
-                out.write(f"}}\n")
+                out.write("}\n")
 
             out.write("</style>\n")
 

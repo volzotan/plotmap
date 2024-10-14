@@ -4,13 +4,13 @@ from core.hatching import HatchingOptions, HatchingDirection, create_hatching
 from core.maptools import DocumentInfo
 from geoalchemy2.shape import to_shape
 from layers.elevation import ElevationLayer
-from shapely.geometry import Polygon, MultiLineString, LineString, MultiPolygon
+from shapely.geometry import Polygon, MultiLineString, MultiPolygon
 from sqlalchemy import Table, Column, Integer, Float, ForeignKey
 from sqlalchemy import engine, MetaData
 from sqlalchemy import select
 
 from sqlalchemy import text
-from geoalchemy2 import WKBElement, WKTElement
+from geoalchemy2 import WKBElement
 
 class Bathymetry(ElevationLayer):
 
@@ -65,7 +65,7 @@ class Bathymetry(ElevationLayer):
 
         hatch = create_hatching(p, bbox, hatching_options)
 
-        if not hatch is None:
+        if hatch is not None:
             return [hatch]
         else:
             return []

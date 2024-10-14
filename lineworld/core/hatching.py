@@ -4,7 +4,7 @@ from enum import Enum
 
 import numpy as np
 import shapely
-from shapely.geometry import MultiLineString, LineString, Polygon, MultiPoint, MultiPolygon
+from shapely.geometry import MultiLineString, LineString, MultiPoint
 from shapely import Geometry
 
 from lineworld.util.geometrytools import unpack_multilinestring

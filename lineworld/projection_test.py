@@ -1,11 +1,8 @@
-import math
 import pyproj
 import shapely
 from shapely.geometry import Polygon, LineString
 from shapely.affinity import affine_transform
-from shapely.ops import transform
 
-import cv2
 import numpy as np
 
 from lineworld.core.svgwriter import SvgWriter

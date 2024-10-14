@@ -1,6 +1,5 @@
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Callable
 
 import cv2
 import numpy as np
@@ -162,7 +161,7 @@ def _extract_polygons(band: np.ndarray,
         parent_index = contour_hierarchy[contour_index][3]
 
         if parent_index >= 0:
-            if not parent_index in holes:
+            if parent_index not in holes:
                 holes[parent_index] = []
 
             points = []

@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 
 from core import maptools
 from core.svgwriter import SvgWriter
-from layers import bathymetry, contour
+from layers import contour
 import subprocess
 
 if __name__ == "__main__":

@@ -139,7 +139,7 @@ class ElevationLayer(Layer):
 
         # Merging tiles into a mosaic
         if not self.MOSAIC_FILE.exists():
-            logger.debug(f"merging mosaic tiles")
+            logger.debug("merging mosaic tiles")
             gebco_grid_to_polygon.merge_and_write(scaled_files, self.MOSAIC_FILE)
 
     def transform(self) -> list[ElevationWorldPolygon]:

@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import pytest
-from pytest import approx
 from shapely.geometry import Polygon
 
 from lineworld.util import gebco_grid_to_polygon

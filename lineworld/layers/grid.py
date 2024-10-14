@@ -1,28 +1,18 @@
-import os
-import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
-import fiona
 import geoalchemy2
-import pyproj
 import shapely
 from core.maptools import DocumentInfo, Projection
-from geoalchemy2 import WKBElement, WKTElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from shapely.affinity import affine_transform
-from shapely.geometry import shape
 from sqlalchemy import MetaData
-from sqlalchemy import Table, Column, Integer, ForeignKey
+from sqlalchemy import Table, Column, Integer
 from sqlalchemy import engine
 from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.core import maptools
-from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
-from lineworld.util import downloader
 from lineworld.util.geometrytools import *
 
 from HersheyFonts import HersheyFonts

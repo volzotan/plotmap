@@ -9,7 +9,7 @@ class LayerStack():
         self.add(layers)
 
     def add(self, layers: Layer | list[Layer]) -> None:
-        if not type(layers) is list:
+        if type(layers) is not list:
             layer = [layers]
 
         for l in layers:

@@ -5,10 +5,9 @@ from pathlib import Path
 
 import fiona
 import geoalchemy2
-import pyproj
 import shapely
 from core.maptools import DocumentInfo, Projection
-from geoalchemy2 import WKBElement, WKTElement
+from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from shapely.affinity import affine_transform, translate
@@ -287,7 +286,7 @@ class Coastlines(Layer):
         # hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
         hatch = None # TODO
 
-        if not hatch is None:
+        if hatch is not None:
             return [MultiLineString(coastlines), hatch]
         else:
             return [MultiLineString(coastlines)]
@@ -326,7 +325,7 @@ class Coastlines(Layer):
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
             }
 
-            result = conn.execute(text(f"""
+            result = conn.execute(text("""
  WITH polys AS (
  	SELECT  id,
 		    ST_MakeValid(
@@ -378,7 +377,7 @@ SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
 
         hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
 
-        if not hatch is None:
+        if hatch is not None:
             return [MultiLineString(hatch)]
         else:
             return [MultiLineString()]
