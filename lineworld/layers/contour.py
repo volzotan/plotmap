@@ -22,7 +22,7 @@ class Contour(ElevationLayer):
                                    Column("elevation_level", Integer),
                                    Column("elevation_min", Float),
                                    Column("elevation_max", Float),
-                                   Column("polygon", geoalchemy2.Geometry("POLYGON", srid=self.DATA_SRID.value), nullable=False)
+                                   Column("polygon", geoalchemy2.Geometry("POLYGON", srid=self.DATA_SRID.value[1]), nullable=False)
                                    )
 
         self.lines_table = Table("contour_lines", metadata,

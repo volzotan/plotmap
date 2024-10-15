@@ -31,12 +31,12 @@ class ElevationWorldPolygon():
         return (
             f"WorldPolygon [{self.id}] elevation: {self.elevation_level} | {self.elevation_min:7.2f} - {self.elevation_max:7.2f}")
 
-    def todict(self) -> dict[str, int | float | str | None]:
+    def todict(self) -> dict[str, int | float | str | WKBElement | None]:
         return {
             "elevation_level": self.elevation_level,
             "elevation_min": self.elevation_min,
             "elevation_max": self.elevation_max,
-            "polygon": str(from_shape(self.polygon))  # Shapely geometry to WKB
+            "polygon": from_shape(self.polygon)
         }
 
 
@@ -156,7 +156,7 @@ class ElevationLayer(Layer):
             self.NUM_ELEVATION_LINES
         )
         logger.debug(
-            f"computed elevation line bounds: {[layer_elevation_bounds[0][0]] + [x[1] for x in layer_elevation_bounds]}")
+            f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}")
 
         for dataset_file in [self.MOSAIC_FILE]:
             logger.info(f"converting raster data to elevation contour polygons: {dataset_file})")
@@ -220,40 +220,12 @@ class ElevationLayer(Layer):
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")
 
-            # params = [p.todict() | {"precision": self.LAT_LON_PRECISION} for p in polygons]
-
-            # viewport_wgs84 = WKTElement(Polygon([
-            #     [-180, 80],
-            #     [-180, -80],
-            #     [180, -80],
-            #     [180, 80],
-            #     [-180, 80]
-            # ]).wkt, srid=self.DATA_SRID.value)
-            #
-            # params = [p.todict() | {"precision": self.LAT_LON_PRECISION, "viewport": viewport_wgs84.as_ewkt().desc} for p in polygons]
-            #
-            # result = conn.execute(text(f"""
-            #     INSERT INTO {self.polygon_table.fullname} (elevation_level, elevation_min, elevation_max, polygon)
-            #     VALUES (
-            #         :elevation_level,
-            #         :elevation_min,
-            #         :elevation_max,
-            #         ST_SimplifyPreserveTopology(
-            #             ST_Intersection(
-            #                 ST_GeomFromWKB(:polygon ::geometry, {self.DATA_SRID.value}),
-            #                 ST_GeomFromText(:viewport)
-            #             ),
-            #             :precision
-            #         )
-            #     )
-            #     """), params)
-
     def project(self, document_info: DocumentInfo) -> list[ElevationMapPolygon]:
 
         with self.db.begin() as conn:
 
             params = {
-                "srid": document_info.projection.value,
+                "srid": document_info.projection.value[1],
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
             }
 
@@ -302,6 +274,8 @@ class ElevationLayer(Layer):
 
             polys = np.array(polygons, dtype=Polygon)
 
+            logger.debug(f"project: loaded polygons: {polys.shape[0]}")
+
             if self.LAT_LON_MIN_SEGMENT_LENGTH is not None:
                 polys = shapely.segmentize(polys, self.LAT_LON_MIN_SEGMENT_LENGTH)
 
@@ -324,7 +298,7 @@ class ElevationLayer(Layer):
             for i in range(polys.shape[0]):
                 geoms = np.array(unpack_multipolygon(polys[i]))
 
-                geoms = geoms[~shapely.is_empty(geoms)]
+                # geoms = geoms[~shapely.is_empty(geoms)]
 
                 mask_small = shapely.area(geoms) < self.FILTER_POLYGON_MIN_AREA_MAP
                 geoms = geoms[~mask_small]
@@ -339,6 +313,7 @@ class ElevationLayer(Layer):
                     layers[layer_number].append(ElevationMapPolygon(None, results[i].id, g))
 
             return self._cut_layers(layers)
+            # return [x for k, v in layers.items() for x in v]
 
     def _cut_layers(self, layers: dict[int, list[ElevationMapPolygon]]) -> list[ElevationMapPolygon]:
 

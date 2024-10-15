@@ -26,14 +26,14 @@ class Bathymetry(ElevationLayer):
             Column("elevation_level", Integer),
             Column("elevation_min", Float),
             Column("elevation_max", Float),
-            Column("polygon", geoalchemy2.Geometry("POLYGON", srid=self.DATA_SRID.value), nullable=False)
+            Column("polygon", geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]), nullable=False)
         )
 
         self.map_polygon_table = Table(
             "bathymetry_map_polygons", metadata,
             Column("id", Integer, primary_key=True),
             Column("world_polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),
-            Column("polygon", geoalchemy2.Geometry("POLYGON", srid=self.DATA_SRID.value), nullable=False)
+            Column("polygon", geoalchemy2.Geometry("POLYGON", srid=self.DATA_SRID.value[1]), nullable=False)
         )
 
         self.map_lines_table = Table(
@@ -119,9 +119,8 @@ class Bathymetry(ElevationLayer):
         with self.db.begin() as conn:
             if select_elevation_level is None:
                 result = conn.execute(select(self.map_polygon_table))
-                drawing_geometries = [to_shape(row.lines) for row in result]
+                drawing_geometries = [to_shape(row.polygon) for row in result]
             else:
-                # result = conn.execute(select(self.lines_table).where(self.lines_table.c.elevation_level == select_elevation_level))
                 result = conn.execute(text(f"""
                      SELECT mp.polygon
                      FROM 

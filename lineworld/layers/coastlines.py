@@ -87,7 +87,7 @@ class Coastlines(Layer):
         self.world_polygon_table = Table("coastlines_world_polygons", metadata,
                                    Column("id", Integer, primary_key=True),
                                    Column("polygon",
-                                          geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value),
+                                          geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]),
                                           nullable=False)
                                    )
 
@@ -169,7 +169,7 @@ class Coastlines(Layer):
         with self.db.begin() as conn:
 
             params = {
-                "srid": document_info.projection.value,
+                "srid": document_info.projection.value[1],
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
             }
 
@@ -321,7 +321,7 @@ class Coastlines(Layer):
         with self.db.begin() as conn:
 
             params = {
-                "srid": document_info.projection.value,
+                "srid": document_info.projection.value[1],
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
             }
 

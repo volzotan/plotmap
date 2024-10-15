@@ -10,10 +10,10 @@ EQUATOR_HALF = EQUATOR / 2.0
 
 
 class Projection(Enum):
-    WGS84 = 4326
-    WEB_MERCATOR = 3857
-    ECKERT_IV = 54012
-    VAN_DER_GRINTEN_I = 54029
+    WGS84 = "EPSG", 4326
+    WEB_MERCATOR = "EPSG", 3857
+    ECKERT_IV = "ESRI", 54012
+    VAN_DER_GRINTEN_I = "ESRI", 54029
 
 
 @dataclass
@@ -52,7 +52,8 @@ class DocumentInfo():
         return shapely.box(-self.width, -self.height, self.width*2, self.height*2)
 
     def get_projection_func(self, src_projection: Projection) -> pyproj.Transformer:
-        crs_src = pyproj.CRS(f"EPSG:{src_projection.value}")
+        crs_src = pyproj.CRS(f"{src_projection.value[0]}:{src_projection.value[1]}")
+        crs_dst = pyproj.CRS(f"{self.projection.value[0]}:{self.projection.value[1]}")
 
         if self.wrapover:
             crs_dst = pyproj.CRS.from_proj4("+proj=vandg +over")
