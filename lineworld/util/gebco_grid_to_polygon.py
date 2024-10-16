@@ -10,7 +10,7 @@ from rasterio.merge import merge
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import transform
 
-MORPH_KERNEL_SIZE = 5
+MORPH_KERNEL_SIZE = 7
 
 WRAPOVER_SEGMENT_WIDTH_LONGITUDE = 60
 

@@ -92,6 +92,8 @@ class SvgWriter():
 
             out.write("<style>\n")
 
+            out.write("path, line { stroke-linecap: round; stroke-linejoin: round; }\n")
+
             if self.background_color is not None:
                 out.write(f"svg {{ background-color: {self.background_color}; }}\n")
 

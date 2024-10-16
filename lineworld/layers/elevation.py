@@ -88,7 +88,7 @@ class ElevationLayer(Layer):
     GEOTIFF_SCALING_FACTOR = 0.5
 
     # minimal area of polygons on a WGS84 geoid in m^2
-    FILTER_POLYGON_MIN_AREA_WGS84 = 1e4
+    FILTER_POLYGON_MIN_AREA_WGS84 = 1e5
 
     # minimal area of polygons on the map (in map units, mm^2)
     FILTER_POLYGON_MIN_AREA_MAP = 1.0
@@ -323,8 +323,12 @@ class ElevationLayer(Layer):
 
         cutting_polygon = MultiPolygon()
         for i in reversed(range(num_layers)):
+
             current_layer_polygon = shapely.unary_union(
                 np.array([p.polygon for p in layers[i]], dtype=Polygon))
+
+            current_layer_polygon.buffer(0.1)
+
             cutting_polygon_new = shapely.union(cutting_polygon, current_layer_polygon)
 
             for emp in layers[i]:
