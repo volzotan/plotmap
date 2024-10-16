@@ -40,32 +40,32 @@ if __name__ == "__main__":
         layer_grid_labels
     ]
 
-    for l in active_layers:
+    for layer in active_layers:
 
         # l.extract()
 
         # timer_start = datetime.datetime.now()
-        # polygons = l.transform()
+        # polygons = layer.transform()
         # logger.debug("transform in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
         #
         # timer_start = datetime.datetime.now()
-        # l.load(polygons)
+        # layer.load(polygons)
         # logger.debug("load in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
 
         timer_start = datetime.datetime.now()
-        polygons = l.project(document_info)
+        polygons = layer.project(document_info)
         logger.debug("project in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
 
         timer_start = datetime.datetime.now()
-        l.load(polygons)
+        layer.load(polygons)
         logger.debug("load in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
 
         timer_start = datetime.datetime.now()
-        lines = l.draw(document_info)
+        lines = layer.draw(document_info)
         logger.debug("draw in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
 
         timer_start = datetime.datetime.now()
-        l.load(lines)
+        layer.load(lines)
         logger.debug("load in {:5.2f}s".format((datetime.datetime.now() - timer_start).total_seconds()))
 
         # pr.enable()
@@ -80,7 +80,6 @@ if __name__ == "__main__":
     # draw_contour, exclude = layer_contour.out(exclude, document_info)
     _, exclude = layer_grid_bathymetry.out(exclude, document_info)
     draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
-    # draw_bathymetry, exclude = layer_bathymetry.out_polygons(exclude, document_info)
 
     svg = SvgWriter("test.svg", [document_info.width, document_info.height])
 
@@ -114,7 +113,7 @@ if __name__ == "__main__":
     svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
     # svg.add("contour", draw_contour, options=options_contour)
     svg.add("coastlines", draw_coastlines)
-    svg.add("gridlabels", draw_grid_labels, options=options_grid)
+    svg.add("grid_labels", draw_grid_labels, options=options_grid)
 
     # options_bathymetry = {
     #     "fill": "none",
@@ -124,7 +123,6 @@ if __name__ == "__main__":
     # }
     #
     # scale = Colorscale([0, 15])
-    #
     # for i in range(15):
     #     polys, _ = layer_bathymetry.out_polygons([], document_info, select_elevation_level=i)
     #     color = "rgb({},{},{})".format(*[int(x * 255) for x in scale.get_color(i)])

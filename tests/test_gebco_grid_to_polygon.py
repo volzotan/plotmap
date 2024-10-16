@@ -61,7 +61,7 @@ def poly_with_hole_and_island() -> np.ndarray:
 
 
 @pytest.mark.parametrize("allow_overlap", [True, False])
-def test_convert_poly_with_hole(poly_with_hole_and_island: np.ndarray, allow_overlap: bool) -> None:
+def test_convert_poly_with_hole_and_island(poly_with_hole_and_island: np.ndarray, allow_overlap: bool) -> None:
     results = gebco_grid_to_polygon._extract_polygons(poly_with_hole_and_island, 50, 255, allow_overlap)
 
     assert len(results) == 2

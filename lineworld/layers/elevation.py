@@ -3,18 +3,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import loguru as logger
+import numpy as np
+import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
-from shapely import to_wkt
+from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon
 from shapely.affinity import affine_transform, translate
 from sqlalchemy import engine
 from sqlalchemy import insert
 from sqlalchemy import text
 from util import gebco_grid_to_polygon
 
-from lineworld.util.geometrytools import *
+from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
 
 @dataclass
@@ -204,18 +207,18 @@ class ElevationLayer(Layer):
 
             case ElevationWorldPolygon():
                 with self.db.begin() as conn:
-                    result = conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    result = conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
 
             case ElevationMapPolygon():
                 with self.db.begin() as conn:
-                    result = conn.execute(text(f"TRUNCATE TABLE {self.map_polygon_table.fullname} CASCADE"))
-                    result = conn.execute(insert(self.map_polygon_table), [g.todict() for g in geometries])
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_polygon_table), [g.todict() for g in geometries])
 
             case ElevationMapLines():
                 with self.db.begin() as conn:
-                    result = conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
-                    result = conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")

@@ -5,8 +5,8 @@ import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
-from shapely import Point, envelope
-from shapely.affinity import affine_transform, translate
+from shapely import envelope, MultiLineString, MultiPolygon, LineString
+from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer
 from sqlalchemy import engine
@@ -14,7 +14,7 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.util.geometrytools import *
+import loguru as logger
 
 from HersheyFonts import HersheyFonts
 
@@ -58,8 +58,8 @@ class Grid(Layer):
             logger.info(f"loading geometries: {len(geometries)}")
 
         with self.db.begin() as conn:
-            result = conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
-            result = conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
+            conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
+            conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
     def _get_gridminmax(self, document_info: DocumentInfo) -> tuple[list[float], list[float]]:
 
@@ -107,8 +107,8 @@ class Grid(Layer):
 
         lines = shapely.segmentize(lines, self.LAT_LON_MIN_SEGMENT_LENGTH)
 
-        lines = [shapely.ops.transform(project_func, l) for l in lines]
-        lines = [affine_transform(l, mat) for l in lines]
+        lines = [shapely.ops.transform(project_func, line) for line in lines]
+        lines = [affine_transform(line, mat) for line in lines]
 
         return [GridMapLines(None, line) for line in lines]
 

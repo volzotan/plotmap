@@ -5,6 +5,7 @@ from pathlib import Path
 
 import fiona
 import geoalchemy2
+import numpy as np
 import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
@@ -12,7 +13,7 @@ from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from shapely.affinity import affine_transform, translate
 from shapely.geometry import shape
-from shapely import to_wkt
+from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer, ForeignKey
 from sqlalchemy import engine
@@ -22,7 +23,10 @@ from sqlalchemy import text
 
 from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
 from lineworld.util import downloader
-from lineworld.util.geometrytools import *
+
+import loguru as logger
+
+from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
 
 @dataclass
@@ -153,13 +157,13 @@ class Coastlines(Layer):
         match geometries[0]:
             case LandPolygon():
                 with self.db.begin() as conn:
-                    result = conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    result = conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
 
             case CoastlineLines():
                 with self.db.begin() as conn:
-                    result = conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
-                    result = conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")

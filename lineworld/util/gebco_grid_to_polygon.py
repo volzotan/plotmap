@@ -12,8 +12,6 @@ from shapely.ops import transform
 
 MORPH_KERNEL_SIZE = 7
 
-WRAPOVER_SEGMENT_WIDTH_LONGITUDE = 60
-
 def _generate_elevation_lines(image: np.ndarray):
     """
     Generate openCV contour lines from raster images
@@ -214,18 +212,6 @@ def convert(geotiff_path: Path, layer_min_max: list[list[float]], allow_overlap:
 
         band = dataset.read(1)
 
-        # if wrapover:
-        #     segment_width = int(band.shape[1]/(360/WRAPOVER_SEGMENT_WIDTH_LONGITUDE))
-        #
-        #     new_shape = [band.shape[0], band.shape[1] + segment_width*2]
-        #     band_wrapover = np.zeros(new_shape, dtype=band.dtype)
-        #
-        #     band_wrapover[:, segment_width:segment_width+band.shape[1]] = band[:,:]
-        #     band_wrapover[:, 0:segment_width] = band[:, -segment_width:]
-        #     band_wrapover[:, segment_width + band.shape[1]:] = band[:, 0:segment_width]
-        #
-        #     band = band_wrapover
-
         polygon_layers: list[list[Polygon]] = []
         mask = np.zeros_like(band, dtype=np.uint8)
 
@@ -241,13 +227,7 @@ def convert(geotiff_path: Path, layer_min_max: list[list[float]], allow_overlap:
 
                 # convert pixel coordinates to lat lon with the geoTiff reference system
                 # flip xy for openCVs row,col order
-                conversion_func = lambda x, y: dataset.xy(y, x)
-
-                # if wrapover:
-                #     longitude_scaling_factor = 1.0 + (WRAPOVER_SEGMENT_WIDTH_LONGITUDE/360)*2
-                #     conversion_func = lambda x, y: (dataset.xy(y, x)[0] * longitude_scaling_factor, dataset.xy(y, x)[1])
-
-                g = transform(conversion_func, g)
+                g = transform(lambda x, y: dataset.xy(y, x), g)
 
                 if type(g) is Polygon:
                     polygons.append(g)
