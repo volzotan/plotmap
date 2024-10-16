@@ -47,6 +47,13 @@ class DocumentInfo():
         yoff = self.height / 2. + self.offset_y
         return [a, b, d, e, xoff, yoff]
 
+    def get_transformation_matrix_font(self, xoff: float, yoff: float) -> list[float]:
+        a = 1
+        b = 0
+        d = 0
+        e = -1
+        return [a, b, d, e, xoff, yoff]
+
     def get_viewport(self) -> Polygon:
         # return shapely.box(0, 0, self.width, self.height)
         return shapely.box(-self.width, -self.height, self.width*2, self.height*2)

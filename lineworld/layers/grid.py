@@ -5,7 +5,8 @@ import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
-from shapely.affinity import affine_transform
+from shapely import Point, envelope
+from shapely.affinity import affine_transform, translate
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer
 from sqlalchemy import engine
@@ -60,21 +61,37 @@ class Grid(Layer):
             result = conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
             result = conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
+    def _get_gridminmax(self, document_info: DocumentInfo) -> tuple[list[float], list[float]]:
 
-    def _create_gridlines(self, document_info: DocumentInfo,
-                          num_lat_lines: int, num_lon_lines: int,
-                          minmax_lat: list[float], minmax_lon: list[float]) -> list[GridMapLines]:
+        minmax_lat = [-90, 90]
+        minmax_lon = [-180, 180]
 
-        if num_lat_lines % 2 == 0 or num_lon_lines % 2 == 0:
-            logger.warning("LATITUDE_LINES and LONGITUDE_LINES need to be an odd number to create null meridian grid lines")
+        if document_info.wrapover:
+            minmax_lon = [-180 - 90, 180 + 90]
+
+        return minmax_lat, minmax_lon
+
+    def _get_gridpositions(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> tuple[list[float], list[float]]:
+
+        minmax_lat, minmax_lon = self._get_gridminmax(document_info)
+
+        lons = [x * distance_lat_lines for x in range(1, minmax_lon[1]//distance_lat_lines)]
+        lons = [x * -1 for x in lons] + [0] + lons
+
+        lats = [x * distance_lon_lines for x in range(1, minmax_lat[1]//distance_lon_lines)]
+        lats = [x * -1 for x in lats] + [0] + lats
+
+        return lats, lons
+
+    def _get_gridlines(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[GridMapLines]:
 
         lines = []
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()
 
-        lats = np.linspace(*minmax_lat, num=num_lat_lines).tolist()#[1:-1]
-        lons = np.linspace(*minmax_lon, num=num_lon_lines).tolist()#[1:-1]
+        minmax_lat, minmax_lon = self._get_gridminmax(document_info)
+        lats, lons = self._get_gridpositions(document_info, distance_lat_lines, distance_lon_lines)
 
         for lat in lats:
             lines.append(LineString([
@@ -113,11 +130,8 @@ class GridBathymetry(Grid):
 
     LAYER_NAME = "GridBathymetry"
 
-    LATITUDE_LINES = 11
-    LONGITUDE_LINES = 17
-
-    MINMAX_LAT = [-90 - 0, 90 + 0]
-    MINMAX_LON = [-180 - 90, 180 + 90]
+    LATITUDE_LINE_DIST = 40
+    LONGITUDE_LINE_DIST = 40
 
     EXCLUDE_BUFFER = 0.5
 
@@ -135,11 +149,7 @@ class GridBathymetry(Grid):
         metadata.create_all(self.db)
 
     def project(self, document_info: DocumentInfo) -> list[GridMapLines]:
-        return self._create_gridlines(
-            document_info,
-            self.LATITUDE_LINES, self.LONGITUDE_LINES,
-            self.MINMAX_LAT, self.MINMAX_LON
-        )
+        return self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -152,31 +162,26 @@ class GridBathymetry(Grid):
             result = conn.execute(select(self.map_lines_table))
             drawing_geometries = [to_shape(row.lines) for row in result]
 
-        # remove extrusion zones
-        drawing_geometries_cut = []
-        # for g in drawing_geometries:
-        #     drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
-
         # extend extrusion zones
         cutting_tool = shapely.unary_union(np.array(drawing_geometries))
         cutting_tool = cutting_tool.buffer(self.EXCLUDE_BUFFER)
+        cutting_tool = shapely.simplify(cutting_tool, document_info.tolerance)
         exclusion_zones = shapely.union(exclusion_zones, cutting_tool)
 
-        return (drawing_geometries_cut, exclusion_zones)
+        return ([], exclusion_zones)
 
 class GridLabels(Grid):
 
     LAYER_NAME = "GridLabels"
 
-    LATITUDE_LINES = 11
-    LONGITUDE_LINES = 17
+    LATITUDE_LINE_DIST = 20
+    LONGITUDE_LINE_DIST = 20
 
-    MINMAX_LAT = [-90 - 0, 90 + 0]
-    MINMAX_LON = [-180 - 90, 180 + 90]
+    EXCLUDE_BUFFER = 2.0
 
-    EXCLUDE_BUFFER = 0.5
+    FONT_SIZE = 8
 
-    FONT_SIZE = 13
+    OFFSET_TOP = 15
 
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
@@ -210,15 +215,39 @@ class GridLabels(Grid):
         return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
 
     def project(self, document_info: DocumentInfo) -> list[GridMapLines]:
-        lines = self._create_gridlines(
-            document_info,
-            self.LATITUDE_LINES, self.LONGITUDE_LINES,
-            self.MINMAX_LAT, self.MINMAX_LON
-        )
 
-        text_lines = self._get_text(self.hfont, "FOO")
+        gridlines = self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
+        lats, lons = self._get_gridpositions(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
 
-        return [GridMapLines(None, text_lines)]
+        project_func = document_info.get_projection_func(self.DATA_SRID)
+        mat = document_info.get_transformation_matrix()
+
+        labels = []
+        for lon in lons:
+            lines = self._get_text(self.hfont, f"{lon}")
+
+            lon_line = LineString([[lon, -90], [lon, +90]])
+            lon_line = shapely.segmentize(lon_line, self.LAT_LON_MIN_SEGMENT_LENGTH)
+
+            lon_line = shapely.ops.transform(project_func, lon_line)
+            lon_line = affine_transform(lon_line, mat)
+
+            intersect_line = LineString([[0, self.OFFSET_TOP], [document_info.width, self.OFFSET_TOP]])
+            intersect_point = lon_line.intersection(intersect_line)
+
+            if intersect_point is None or intersect_point.is_empty:
+                logger.warning("failed computing position for label")
+                continue
+
+            center_offset = -envelope(lines).centroid.x
+
+            mat_font = document_info.get_transformation_matrix_font(xoff=intersect_point.x+center_offset, yoff=intersect_point.y)
+            lines = affine_transform(lines, mat_font)
+
+            labels.append(GridMapLines(None, lines))
+
+        # return gridlines + labels
+        return labels
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -239,6 +268,7 @@ class GridLabels(Grid):
         # extend extrusion zones
         cutting_tool = shapely.unary_union(np.array(drawing_geometries))
         cutting_tool = cutting_tool.buffer(self.EXCLUDE_BUFFER)
+        cutting_tool = shapely.simplify(cutting_tool, document_info.tolerance)
         exclusion_zones = shapely.union(exclusion_zones, cutting_tool)
 
         return (drawing_geometries_cut, exclusion_zones)
