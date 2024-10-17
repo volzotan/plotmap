@@ -30,11 +30,11 @@ class DocumentInfo():
     wrapover: bool = True
 
     # units in mm
-    width: float = 2000
-    height: float = 1100
+    width: float = 2000//2
+    height: float = 1100//2
 
     offset_x: float = 0.0
-    offset_y: float = 180
+    offset_y: float = 180//2
 
     tolerance: float = 0.1
 
