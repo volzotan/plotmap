@@ -175,13 +175,16 @@ class GridLabels(Grid):
     LAYER_NAME = "GridLabels"
 
     LATITUDE_LINE_DIST = 20
-    LONGITUDE_LINE_DIST = 20
+    LONGITUDE_LINE_DIST = 40
 
     EXCLUDE_BUFFER = 2.0
 
     FONT_SIZE = 8
 
     OFFSET_TOP = 15
+    OFFSET_BOTTOM = OFFSET_TOP
+    OFFSET_LEFT = 5
+    OFFSET_RIGHT = OFFSET_LEFT
 
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
@@ -223,8 +226,16 @@ class GridLabels(Grid):
         mat = document_info.get_transformation_matrix()
 
         labels = []
+
         for lon in lons:
-            lines = self._get_text(self.hfont, f"{lon}")
+
+            line_label = lon
+            if line_label < -180:
+                line_label = line_label + 360
+            if line_label > +180:
+                line_label = line_label - 360
+
+            lines = self._get_text(self.hfont, f"{line_label}")
 
             lon_line = LineString([[lon, -90], [lon, +90]])
             lon_line = shapely.segmentize(lon_line, self.LAT_LON_MIN_SEGMENT_LENGTH)
@@ -232,19 +243,103 @@ class GridLabels(Grid):
             lon_line = shapely.ops.transform(project_func, lon_line)
             lon_line = affine_transform(lon_line, mat)
 
-            intersect_line = LineString([[0, self.OFFSET_TOP], [document_info.width, self.OFFSET_TOP]])
-            intersect_point = lon_line.intersection(intersect_line)
+            # TOP
 
-            if intersect_point is None or intersect_point.is_empty:
+            intersect_point_top = lon_line.intersection(
+                LineString([[0, self.OFFSET_TOP], [document_info.width, self.OFFSET_TOP]])
+            )
+
+            if intersect_point_top is None or intersect_point_top.is_empty:
                 logger.warning("failed computing position for label")
                 continue
 
             center_offset = -envelope(lines).centroid.x
 
-            mat_font = document_info.get_transformation_matrix_font(xoff=intersect_point.x+center_offset, yoff=intersect_point.y)
-            lines = affine_transform(lines, mat_font)
+            mat_font = document_info.get_transformation_matrix_font(
+                xoff=intersect_point_top.x + center_offset,
+                yoff=intersect_point_top.y
+            )
 
-            labels.append(GridMapLines(None, lines))
+            labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
+
+            # BOTTOM
+
+            intersect_point_bottom = lon_line.intersection(
+                LineString([
+                    [0, document_info.height-self.OFFSET_BOTTOM+self.FONT_SIZE],
+                    [document_info.width, document_info.height-self.OFFSET_BOTTOM+self.FONT_SIZE]
+                ])
+            )
+
+            if intersect_point_bottom is None or intersect_point_bottom.is_empty:
+                logger.warning("failed computing position for label")
+                continue
+
+            mat_font = document_info.get_transformation_matrix_font(
+                xoff=intersect_point_bottom.x + center_offset,
+                yoff=intersect_point_bottom.y
+            )
+
+            labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
+
+        for lat in lats:
+
+            lines = self._get_text(self.hfont, f"{lat}")
+
+            min_lon = -180
+            max_lon = 180
+
+            if document_info.wrapover:
+                min_lon = -180 - 90
+                max_lon = +180 + 90
+
+            lat_line = LineString([[min_lon, lat], [max_lon, lat]])
+            lat_line = shapely.segmentize(lat_line, self.LAT_LON_MIN_SEGMENT_LENGTH)
+
+            lat_line = shapely.ops.transform(project_func, lat_line)
+            lat_line = affine_transform(lat_line, mat)
+
+            # LEFT
+
+            intersect_point_left = lat_line.intersection(
+                LineString([[self.OFFSET_LEFT, 0], [self.OFFSET_LEFT, document_info.height]])
+            )
+
+            if type(intersect_point_left) is not Point or intersect_point_left is None or intersect_point_left.is_empty:
+                logger.warning(f"failed computing position for label [lat: {lat}]")
+                continue
+
+            center_offset = +envelope(lines).centroid.y
+
+            mat_font = document_info.get_transformation_matrix_font(
+                xoff=intersect_point_left.x,
+                yoff=intersect_point_left.y + center_offset
+            )
+
+            labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
+
+            # RIGHT
+
+            intersect_point_right = lat_line.intersection(
+                LineString([
+                    [document_info.width - self.OFFSET_RIGHT, 0],
+                    [document_info.width - self.OFFSET_RIGHT, document_info.height]
+                ])
+            )
+
+            if type(intersect_point_right) is not Point or intersect_point_right is None or intersect_point_right.is_empty:
+                logger.warning(f"failed computing position for label [lat: {lat}]")
+                continue
+
+            center_offset = envelope(lines).centroid.xy
+
+            mat_font = document_info.get_transformation_matrix_font(
+                xoff=intersect_point_right.x - center_offset[0][0]*2,
+                yoff=intersect_point_right.y + center_offset[1][0]
+            )
+
+            labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
+
 
         # return gridlines + labels
         return labels
