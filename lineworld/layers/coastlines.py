@@ -5,15 +5,16 @@ from pathlib import Path
 
 import fiona
 import geoalchemy2
+from loguru import logger
 import numpy as np
 import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
+from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString
 from shapely.affinity import affine_transform, translate
 from shapely.geometry import shape
-from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer, ForeignKey
 from sqlalchemy import engine
@@ -23,9 +24,6 @@ from sqlalchemy import text
 
 from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
 from lineworld.util import downloader
-
-import loguru as logger
-
 from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
 
@@ -89,18 +87,18 @@ class Coastlines(Layer):
         metadata = MetaData()
 
         self.world_polygon_table = Table("coastlines_world_polygons", metadata,
-                                   Column("id", Integer, primary_key=True),
-                                   Column("polygon",
-                                          geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]),
-                                          nullable=False)
-                                   )
+                                         Column("id", Integer, primary_key=True),
+                                         Column("polygon",
+                                                geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]),
+                                                nullable=False)
+                                         )
 
         self.map_lines_table = Table("coastlines_map_lines", metadata,
-                                 Column("id", Integer, primary_key=True),
-                                 Column("polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),
-                                 Column("lines",
-                                        geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
-                                 )
+                                     Column("id", Integer, primary_key=True),
+                                     Column("polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),
+                                     Column("lines",
+                                            geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
+                                     )
 
         metadata.create_all(self.db)
 
@@ -168,10 +166,8 @@ class Coastlines(Layer):
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")
 
-
     def project(self, document_info: DocumentInfo) -> list[CoastlineLines]:
         with self.db.begin() as conn:
-
             params = {
                 "srid": document_info.projection.value[1],
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
@@ -233,7 +229,6 @@ class Coastlines(Layer):
                         to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85))}
                 ).all()
 
-
                 polygons_right = [translate(to_shape(WKBElement(x.poly)), xoff=360) for x in result_right]
                 polygons_left = [translate(to_shape(WKBElement(x.poly)), xoff=-360) for x in result_left]
 
@@ -261,7 +256,6 @@ class Coastlines(Layer):
 
             return processed_coastlinesPolygonLines
 
-
     def style(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
         MultiLineString]:
 
@@ -288,13 +282,12 @@ class Coastlines(Layer):
         hatching_options.direction = HatchingDirection.ANGLE_45
 
         # hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
-        hatch = None # TODO
+        hatch = None  # TODO
 
         if hatch is not None:
             return [MultiLineString(coastlines), hatch]
         else:
             return [MultiLineString(coastlines)]
-
 
     def draw(self, document_info: DocumentInfo) -> None:
         pass
@@ -317,13 +310,8 @@ class Coastlines(Layer):
 
         return (viewport_lines.tolist(), exclusion_zones)
 
-
-
-
-
     def project2(self, document_info: DocumentInfo) -> list[CoastlineLines]:
         with self.db.begin() as conn:
-
             params = {
                 "srid": document_info.projection.value[1],
                 "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
@@ -364,7 +352,6 @@ SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
 
             return processed_coastlinesPolygonLines
 
-
     def style2(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
         MultiLineString]:
 
@@ -373,7 +360,6 @@ SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
         buffered = shapely.unary_union(polygons)
 
         logger.debug("union done")
-
 
         hatching_options = HatchingOptions()
         hatching_options.distance = 2.0

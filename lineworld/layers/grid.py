@@ -5,7 +5,7 @@ import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
-from shapely import envelope, MultiLineString, MultiPolygon, LineString
+from shapely import envelope, MultiLineString, MultiPolygon, LineString, Point
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer
@@ -14,7 +14,7 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-import loguru as logger
+from loguru import logger
 
 from HersheyFonts import HersheyFonts
 

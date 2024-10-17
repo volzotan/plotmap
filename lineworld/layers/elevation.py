@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import loguru as logger
+from loguru import logger
 import numpy as np
 import shapely
 from core.maptools import DocumentInfo, Projection
@@ -223,7 +223,7 @@ class ElevationLayer(Layer):
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")
 
-    def project(self, document_info: DocumentInfo) -> list[ElevationMapPolygon]:
+    def project(self, document_info: DocumentInfo, allow_overlap: bool = False) -> list[ElevationMapPolygon]:
 
         with self.db.begin() as conn:
 
@@ -315,8 +315,10 @@ class ElevationLayer(Layer):
 
                     layers[layer_number].append(ElevationMapPolygon(None, results[i].id, g))
 
-            return self._cut_layers(layers)
-            # return [x for k, v in layers.items() for x in v]
+            if allow_overlap:
+                return [x for k, v in layers.items() for x in v]
+            else:
+                return self._cut_layers(layers)
 
     def _cut_layers(self, layers: dict[int, list[ElevationMapPolygon]]) -> list[ElevationMapPolygon]:
 
