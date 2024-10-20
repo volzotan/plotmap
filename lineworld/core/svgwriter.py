@@ -12,7 +12,7 @@ class SvgWriter():
     filename: Path
     dimensions: list[int | float]
     image: str | None = None
-    background_color: list[int] | None = None
+    background_color: str | None = None
     offset: list[int | float] = [0, 0]
 
     layers: dict[str, list[tuple[Geometry, SvgOptions]]] = {}

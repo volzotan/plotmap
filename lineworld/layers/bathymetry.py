@@ -2,15 +2,17 @@ import geoalchemy2
 import shapely
 from core.hatching import HatchingOptions, HatchingDirection, create_hatching
 from core.maptools import DocumentInfo
+from geoalchemy2 import WKBElement
 from geoalchemy2.shape import to_shape
 from layers.elevation import ElevationLayer
 from shapely.geometry import Polygon, MultiLineString, MultiPolygon
 from sqlalchemy import Table, Column, Integer, Float, ForeignKey
 from sqlalchemy import engine, MetaData
 from sqlalchemy import select
-
 from sqlalchemy import text
-from geoalchemy2 import WKBElement
+
+from lineworld.util.geometrytools import unpack_multipolygon
+
 
 class Bathymetry(ElevationLayer):
 
@@ -85,23 +87,22 @@ class Bathymetry(ElevationLayer):
                 result = conn.execute(select(self.map_lines_table))
                 drawing_geometries = [to_shape(row.lines) for row in result]
             else:
-                # result = conn.execute(select(self.lines_table).where(self.lines_table.c.elevation_level == select_elevation_level))
                 result = conn.execute(text(f"""
                      SELECT lines
                      FROM 
-                         {self.lines_table} AS lines JOIN 
-                         {self.polygon_table} AS polygons ON lines.polygon_id = polygons.id
+                         {self.map_lines_table} AS ml JOIN 
+                         {self.map_polygon_table} AS mp ON ml.map_polygon_id = mp.id
+                         JOIN {self.world_polygon_table} AS wp ON mp.world_polygon_id = wp.id
                      WHERE 
-                         polygons.elevation_level = :elevation_level
-
+                         wp.elevation_level = :elevation_level
                  """), {
                     "elevation_level": select_elevation_level
                 })
 
                 drawing_geometries = [to_shape(WKBElement(row.lines)) for row in result]
 
-        drawing_geometries_cut = []
         # remove extrusion zones
+        drawing_geometries_cut = []
         for g in drawing_geometries:
             # drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
             drawing_geometries_cut.append(shapely.intersection(g, stencil))
@@ -109,11 +110,13 @@ class Bathymetry(ElevationLayer):
         return (drawing_geometries_cut, exclusion_zones)
 
     def out_polygons(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo,
-            select_elevation_level: int | None = None) -> tuple[
+                     select_elevation_level: int | None = None) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
+
+        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
 
         drawing_geometries = []
         with self.db.begin() as conn:
@@ -134,4 +137,11 @@ class Bathymetry(ElevationLayer):
 
                 drawing_geometries = [to_shape(WKBElement(row.polygon)) for row in result]
 
-        return (drawing_geometries, exclusion_zones)
+            # remove extrusion zones
+            drawing_geometries_cut = []
+            for g in drawing_geometries:
+                # drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
+                drawing_geometries_cut += unpack_multipolygon(shapely.intersection(g, stencil))
+
+        # return (drawing_geometries, exclusion_zones)
+        return (drawing_geometries_cut, exclusion_zones)

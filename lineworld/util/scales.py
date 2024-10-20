@@ -6,15 +6,8 @@ class Colorscale():
     def __init__(self, d, colormap_name="viridis"):
         self.d = d
 
-        values = getattr(colormaps, "_{}_data".format(colormap_name))
+        values = getattr(colormaps, f"_{colormap_name}_data")
         self.colormap = ListedColormap(values, name=colormap_name)
-
-        # print(colormap(0.5)[:-1])
-
-        # if type(value) in [list, tuple]:
-        #     print("list")
-        # else:
-        #     print("no list")
 
 
     def get_color(self, value):
