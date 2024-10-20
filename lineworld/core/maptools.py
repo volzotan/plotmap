@@ -1,13 +1,10 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 import pyproj
 import shapely
 from shapely.geometry import Polygon
-
-EQUATOR = 40075016.68557849
-EQUATOR_HALF = EQUATOR / 2.0
-
 
 class Projection(Enum):
     WGS84 = "EPSG", 4326
@@ -31,18 +28,20 @@ class DocumentInfo():
 
     # units in mm
     width: float = 2000//2
-    height: float = 1100//2
+    height: float = 1200//2
 
     offset_x: float = 0.0
-    offset_y: float = 180//2
+    offset_y: float = 170//2
 
     tolerance: float = 0.1
 
+    EQUATOR = 40075016.68557849
+
     def get_transformation_matrix(self) -> list[float]:
-        a = 1 / EQUATOR * self.width
+        a = 1 / self.EQUATOR * self.width
         b = 0
         d = 0
-        e = 1 / EQUATOR * self.width * -1  # vertical flip
+        e = 1 / self.EQUATOR * self.width * -1  # vertical flip
         xoff = self.width / 2. + self.offset_x
         yoff = self.height / 2. + self.offset_y
         return [a, b, d, e, xoff, yoff]
@@ -58,7 +57,7 @@ class DocumentInfo():
         # return shapely.box(0, 0, self.width, self.height)
         return shapely.box(-self.width, -self.height, self.width*2, self.height*2)
 
-    def get_projection_func(self, src_projection: Projection) -> pyproj.Transformer:
+    def get_projection_func(self, src_projection: Projection) -> Any:
         crs_src = pyproj.CRS(f"{src_projection.value[0]}:{src_projection.value[1]}")
         crs_dst = pyproj.CRS(f"{self.projection.value[0]}:{self.projection.value[1]}")
 

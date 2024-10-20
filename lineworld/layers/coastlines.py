@@ -5,13 +5,13 @@ from pathlib import Path
 
 import fiona
 import geoalchemy2
-from loguru import logger
 import numpy as np
 import shapely
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
+from loguru import logger
 from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString
 from shapely.affinity import affine_transform, translate
 from shapely.geometry import shape
@@ -76,6 +76,9 @@ class Coastlines(Layer):
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
     WRAPOVER_LONGITUDE_EXTENSION = 60
 
+    BUFFER_DISTANCE = 2
+    HATCHING_DISTANCE = 2.0
+
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
 
@@ -115,7 +118,7 @@ class Coastlines(Layer):
             logger.info(f"Unpacking OSM land polygon shapefiles: {filename_zip.name}")
             shutil.unpack_archive(filename_zip, self.DATA_DIR)
 
-    def transform(self) -> list[LandPolygon]:
+    def transform_to_world(self) -> list[LandPolygon]:
 
         logger.info("extracting land polygons from OSM shapefile")
 
@@ -141,32 +144,10 @@ class Coastlines(Layer):
 
         return [LandPolygon(None, polys[i]) for i in range(polys.shape[0])]
 
-    def load(self, geometries: list[LandPolygon | CoastlineLines]) -> None:
+    def transform_to_map(self, document_info: DocumentInfo) -> None:
+        pass
 
-        if geometries is None:
-            return
-
-        if len(geometries) == 0:
-            logger.warning("no geometries to load. abort")
-            return
-        else:
-            logger.info(f"loading geometries: {len(geometries)}")
-
-        match geometries[0]:
-            case LandPolygon():
-                with self.db.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
-
-            case CoastlineLines():
-                with self.db.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
-                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
-
-            case _:
-                raise Exception(f"unknown geometry: {geometries[0]}")
-
-    def project(self, document_info: DocumentInfo) -> list[CoastlineLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[CoastlineLines]:
         with self.db.begin() as conn:
             params = {
                 "srid": document_info.projection.value[1],
@@ -250,22 +231,20 @@ class Coastlines(Layer):
                 unpack=True
             )
 
-            mlines = self.style(polygons, document_info)
+            mlines = self._style(polygons, document_info)
 
             processed_coastlinesPolygonLines = [CoastlineLines(None, None, mline) for mline in mlines]
 
             return processed_coastlinesPolygonLines
 
-    def style(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
+    def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
         MultiLineString]:
-
-        logger.debug("style")
 
         inner = shapely.unary_union(polygons)
 
         logger.debug("union done")
 
-        buffered = inner.buffer(3)
+        buffered = inner.buffer(self.BUFFER_DISTANCE)
         buffered = shapely.difference(buffered, inner)
 
         logger.debug("buffer + difference done")
@@ -278,19 +257,40 @@ class Coastlines(Layer):
         logger.debug("hatching begin")
 
         hatching_options = HatchingOptions()
-        hatching_options.distance = 2.0
+        hatching_options.distance = self.HATCHING_DISTANCE
         hatching_options.direction = HatchingDirection.ANGLE_45
 
-        # hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
-        hatch = None  # TODO
+        hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
 
         if hatch is not None:
             return [MultiLineString(coastlines), hatch]
         else:
             return [MultiLineString(coastlines)]
 
-    def draw(self, document_info: DocumentInfo) -> None:
-        pass
+    def load(self, geometries: list[LandPolygon | CoastlineLines]) -> None:
+
+        if geometries is None:
+            return
+
+        if len(geometries) == 0:
+            logger.warning("no geometries to load. abort")
+            return
+        else:
+            logger.info(f"loading geometries: {len(geometries)}")
+
+        match geometries[0]:
+            case LandPolygon():
+                with self.db.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+
+            case CoastlineLines():
+                with self.db.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
+
+            case _:
+                raise Exception(f"unknown geometry: {geometries[0]}")
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -318,25 +318,24 @@ class Coastlines(Layer):
             }
 
             result = conn.execute(text("""
- WITH polys AS (
- 	SELECT  id,
-		    ST_MakeValid(
-				ST_Simplify(
-					ST_Transform(
-			    		polygon::geometry,
-			    		3857
-					), 
-					10000
-		   		)
-			) AS poly
-	FROM coastlines_world_polygons
-	WHERE ST_Area(polygon) >= 1000000000
-), unions AS (
-	SELECT ST_Union(poly) AS un
-	FROM polys
-)
-SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
-
+                WITH polys AS (
+                    SELECT  id,
+                            ST_MakeValid(
+                                ST_Simplify(
+                                    ST_Transform(
+                                        polygon::geometry,
+                                        3857
+                                    ), 
+                                    10000
+                                )
+                            ) AS poly
+                    FROM coastlines_world_polygons
+                    WHERE ST_Area(polygon) >= 1000000000
+                ), unions AS (
+                    SELECT ST_Union(poly) AS un
+                    FROM polys
+                )
+                SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
             """), params)
 
             results = result.all()

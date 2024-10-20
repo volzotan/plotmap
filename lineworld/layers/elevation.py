@@ -145,7 +145,7 @@ class ElevationLayer(Layer):
             logger.debug("merging mosaic tiles")
             gebco_grid_to_polygon.merge_and_write(scaled_files, self.MOSAIC_FILE)
 
-    def transform(self) -> list[ElevationWorldPolygon]:
+    def transform_to_world(self) -> list[ElevationWorldPolygon]:
         """
         Transform GEBCO geoTiff raster image data to shapely polygons on layers with fixed min-max elevations
         """
@@ -174,7 +174,7 @@ class ElevationLayer(Layer):
                 polys = process_polygons(
                     converted_layers[layer_index],
                     simplify_precision=self.LAT_LON_PRECISION,
-                    min_area_wgs84=self.FILTER_POLYGON_MIN_AREA_WGS84,
+                    # min_area_wgs84=self.FILTER_POLYGON_MIN_AREA_WGS84, # warning, may incorrectly filter very large/complex polygons
                     check_empty=True,
                     check_valid=True,
                     unpack=True
@@ -192,40 +192,9 @@ class ElevationLayer(Layer):
 
         return polygons
 
-    def load(self, geometries: list[Any]) -> None:
+    def transform_to_map(self, document_info: DocumentInfo, allow_overlap: bool = False) -> list[ElevationMapPolygon]:
 
-        if geometries is None:
-            return
-
-        if len(geometries) == 0:
-            logger.warning("no geometries to load. abort")
-            return
-        else:
-            logger.info(f"loading geometries: {len(geometries)}")
-
-        match geometries[0]:
-
-            case ElevationWorldPolygon():
-                with self.db.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
-
-            case ElevationMapPolygon():
-                with self.db.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {self.map_polygon_table.fullname} CASCADE"))
-                    conn.execute(insert(self.map_polygon_table), [g.todict() for g in geometries])
-
-            case ElevationMapLines():
-                with self.db.begin() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
-                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
-
-            case _:
-                raise Exception(f"unknown geometry: {geometries[0]}")
-
-    def project(self, document_info: DocumentInfo, allow_overlap: bool = False) -> list[ElevationMapPolygon]:
-
-        with self.db.begin() as conn:
+        with (self.db.begin() as conn):
 
             params = {
                 "srid": document_info.projection.value[1],
@@ -301,17 +270,17 @@ class ElevationLayer(Layer):
             for i in range(polys.shape[0]):
                 geoms = np.array(unpack_multipolygon(polys[i]))
 
-                # geoms = geoms[~shapely.is_empty(geoms)]
+                geoms = geoms[~shapely.is_empty(geoms)]
 
                 mask_small = shapely.area(geoms) < self.FILTER_POLYGON_MIN_AREA_MAP
                 geoms = geoms[~mask_small]
 
+                layer_number = results[i].elevation_level
+                if layer_number not in layers:
+                    layers[layer_number] = []
+
                 for j in range(geoms.shape[0]):
                     g = geoms[j]
-
-                    layer_number = results[i].elevation_level
-                    if layer_number not in layers:
-                        layers[layer_number] = []
 
                     layers[layer_number].append(ElevationMapPolygon(None, results[i].id, g))
 
@@ -348,14 +317,14 @@ class ElevationLayer(Layer):
 
         return result_list
 
-    def draw(self, document_info: DocumentInfo) -> list[ElevationMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[ElevationMapLines]:
         with self.db.begin() as conn:
 
             # for some reason it's faster to not use WHERE NOT ST_IsEmpty(poly) in the SQL command
 
             result = conn.execute(text(f"""
                 SELECT  mp.id, wp.elevation_level, mp.polygon AS poly, ST_Envelope(mp.polygon) AS bbox
-                FROM {self.map_polygon_table} AS mp JOIN 
+                FROM    {self.map_polygon_table} AS mp JOIN 
                         {self.world_polygon_table} AS wp ON mp.world_polygon_id = wp.id
                 """))
 
@@ -373,7 +342,7 @@ class ElevationLayer(Layer):
 
             processed_elevationPolygonLines = []
             for i in range(polys.shape[0]):
-                for mline in self.style(polys[i], results[i].elevation_level, document_info, bbox=bboxes[i]):
+                for mline in self._style(polys[i], results[i].elevation_level, document_info, bbox=bboxes[i]):
 
                     if mline.is_empty:
                         continue
@@ -385,11 +354,42 @@ class ElevationLayer(Layer):
         #     result = conn.execute(insert(self.lines_table), [l.todict() for l in processed_elevationPolygonLines])
 
         stat["output"] = len(processed_elevationPolygonLines)
-        logger.debug("Convert Filtering:")
+        logger.debug("Draw Filtering:")
         for k, v in stat.items():
             logger.debug(f"{k:10} : {v:10}")
 
         return processed_elevationPolygonLines
 
-    def style(self, p: Polygon, document_info: DocumentInfo, bbox: Polygon | None = None) -> list[MultiLineString]:
+
+    def load(self, geometries: list[Any]) -> None:
+        if geometries is None:
+            return
+
+        if len(geometries) == 0:
+            logger.warning("no geometries to load. abort")
+            return
+        else:
+            logger.info(f"loading geometries: {len(geometries)}")
+
+        match geometries[0]:
+
+            case ElevationWorldPolygon():
+                with self.db.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+
+            case ElevationMapPolygon():
+                with self.db.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_polygon_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_polygon_table), [g.todict() for g in geometries])
+
+            case ElevationMapLines():
+                with self.db.begin() as conn:
+                    conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
+                    conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
+
+            case _:
+                raise Exception(f"unknown geometry: {geometries[0]}")
+
+    def _style(self, p: Polygon, document_info: DocumentInfo, bbox: Polygon | None = None) -> list[MultiLineString]:
         raise NotImplementedError("Must override method")

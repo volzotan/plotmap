@@ -45,19 +45,19 @@ class Bathymetry(ElevationLayer):
 
         metadata.create_all(self.db)
 
-    def style(self, p: Polygon,
+    def _style(self, p: Polygon,
               elevation_level: int,
               document_info: DocumentInfo,
               bbox: Polygon | None = None) -> list[MultiLineString]:
-        # order: ((MINX, MINY), (MINX, MAXY), (MAXX, MAXY), (MAXX, MINY), (MINX, MINY))
-        # ref: https://postgis.net/docs/ST_Envelope.html
+
         if bbox is not None:
+
+            # order: ((MINX, MINY), (MINX, MAXY), (MAXX, MAXY), (MAXX, MINY), (MINX, MINY))
+            # ref: https://postgis.net/docs/ST_Envelope.html
+
             bbox = [*bbox.envelope.exterior.coords[0], *bbox.envelope.exterior.coords[2]]
 
-        # TODO debug
-        # return [MultiLineString([LineString(p.exterior.coords)])]
-
-        elevation_level_hatching_distance = [3.0 - 0.1 * i for i in range(20)]
+        elevation_level_hatching_distance = [4.0 - 0.2 * i for i in range(20)] # TODO: move to configuration object
 
         hatching_options = HatchingOptions()
         hatching_options.distance = elevation_level_hatching_distance[elevation_level]

@@ -113,13 +113,13 @@ class Grid(Layer):
         return [GridMapLines(None, line) for line in lines]
 
 
-    def project(self, document_info: DocumentInfo) -> list[GridMapLines]:
+    def transform_to_map(self, document_info: DocumentInfo) -> list[GridMapLines]:
         pass
 
-    def draw(self, document_info: DocumentInfo) -> None:
+    def transform_to_lines(self, document_info: DocumentInfo) -> None:
         pass
 
-    def style(self, polygons: np.ndarray, document_info: DocumentInfo) -> None:
+    def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> None:
         pass
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[list[shapely.Geometry], MultiPolygon]:
@@ -130,10 +130,10 @@ class GridBathymetry(Grid):
 
     LAYER_NAME = "GridBathymetry"
 
-    LATITUDE_LINE_DIST = 40
-    LONGITUDE_LINE_DIST = 40
+    LATITUDE_LINE_DIST = 20
+    LONGITUDE_LINE_DIST = 20
 
-    EXCLUDE_BUFFER = 0.5
+    EXCLUDE_BUFFER = 0.3
 
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
@@ -148,7 +148,7 @@ class GridBathymetry(Grid):
 
         metadata.create_all(self.db)
 
-    def project(self, document_info: DocumentInfo) -> list[GridMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
         return self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
@@ -175,13 +175,13 @@ class GridLabels(Grid):
     LAYER_NAME = "GridLabels"
 
     LATITUDE_LINE_DIST = 20
-    LONGITUDE_LINE_DIST = 40
+    LONGITUDE_LINE_DIST = 20
 
     EXCLUDE_BUFFER = 2.0
 
-    FONT_SIZE = 8
+    FONT_SIZE = 5
 
-    OFFSET_TOP = 15
+    OFFSET_TOP = 10
     OFFSET_BOTTOM = OFFSET_TOP
     OFFSET_LEFT = 5
     OFFSET_RIGHT = OFFSET_LEFT
@@ -217,7 +217,7 @@ class GridLabels(Grid):
 
         return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
 
-    def project(self, document_info: DocumentInfo) -> list[GridMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
 
         gridlines = self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
         lats, lons = self._get_gridpositions(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
