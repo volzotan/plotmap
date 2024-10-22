@@ -16,9 +16,12 @@ from lineworld.layers.elevation import ElevationMapPolygon
 
 class Contour(ElevationLayer):
 
-    def __init__(self, layer_name: str, elevation_anchors: list[int | float], num_elevation_lines: int,
-                 db: engine.Engine) -> None:
-        super().__init__(layer_name, elevation_anchors, num_elevation_lines, db)
+    def __init__(self,
+                 layer_name: str,
+                 db: engine.Engine,
+                 elevation_anchors: list[int | float] = [0, 10000],
+                 num_elevation_lines: int = 10) -> None:
+        super().__init__(layer_name, db, elevation_anchors=elevation_anchors, num_elevation_lines=num_elevation_lines)
 
         metadata = MetaData()
 
