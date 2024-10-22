@@ -89,22 +89,20 @@ class ElevationLayer(Layer):
     MOSAIC_FILE = Path(DATA_DIR, "gebco_mosaic.tif")
 
     GEOTIFF_SCALING_FACTOR = 0.5
-
     # minimal area of polygons on a WGS84 geoid in m^2
     FILTER_POLYGON_MIN_AREA_WGS84 = 1e5
-
     # minimal area of polygons on the map (in map units, mm^2)
     FILTER_POLYGON_MIN_AREA_MAP = 1.0
-
     # simplification tolerance in WGS84 latlon, resolution: 1°=111.32km (equator worst case)
     LAT_LON_PRECISION = 0.01
-
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
-
     WRAPOVER_LONGITUDE_EXTENSION = 60
 
-    def __init__(self, layer_name: str, elevation_anchors: list[int | float], num_elevation_lines: int,
-                 db: engine.Engine) -> None:
+    def __init__(self,
+                 layer_name: str,
+                 db: engine.Engine,
+                 elevation_anchors: list[int | float] = [0, 10000],
+                 num_elevation_lines: int = 10) -> None:
         super().__init__(layer_name, db)
 
         self.ELEVATION_ANCHORS = elevation_anchors

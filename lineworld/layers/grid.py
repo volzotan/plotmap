@@ -1,10 +1,13 @@
 from dataclasses import dataclass
 
 import geoalchemy2
+import numpy as np
 import shapely
+from HersheyFonts import HersheyFonts
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
+from loguru import logger
 from shapely import envelope, MultiLineString, MultiPolygon, LineString, Point
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
@@ -14,11 +17,8 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from loguru import logger
+from lineworld.util.geometrytools import hershey_text_to_lines
 
-from HersheyFonts import HersheyFonts
-
-import numpy as np
 
 @dataclass
 class GridMapLines():
@@ -32,7 +32,6 @@ class GridMapLines():
 
 
 class Grid(Layer):
-
     DATA_SRID = Projection.WGS84
 
     LAT_LON_MIN_SEGMENT_LENGTH = 1e-1
@@ -71,19 +70,21 @@ class Grid(Layer):
 
         return minmax_lat, minmax_lon
 
-    def _get_gridpositions(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> tuple[list[float], list[float]]:
+    def _get_gridpositions(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> \
+    tuple[list[float], list[float]]:
 
         minmax_lat, minmax_lon = self._get_gridminmax(document_info)
 
-        lons = [x * distance_lat_lines for x in range(1, minmax_lon[1]//distance_lat_lines)]
+        lons = [x * distance_lat_lines for x in range(1, minmax_lon[1] // distance_lat_lines)]
         lons = [x * -1 for x in lons] + [0] + lons
 
-        lats = [x * distance_lon_lines for x in range(1, minmax_lat[1]//distance_lon_lines)]
+        lats = [x * distance_lon_lines for x in range(1, minmax_lat[1] // distance_lon_lines)]
         lats = [x * -1 for x in lats] + [0] + lats
 
         return lats, lons
 
-    def _get_gridlines(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[GridMapLines]:
+    def _get_gridlines(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[
+        GridMapLines]:
 
         lines = []
 
@@ -112,7 +113,6 @@ class Grid(Layer):
 
         return [GridMapLines(None, line) for line in lines]
 
-
     def transform_to_map(self, document_info: DocumentInfo) -> list[GridMapLines]:
         pass
 
@@ -122,12 +122,12 @@ class Grid(Layer):
     def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> None:
         pass
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[list[shapely.Geometry], MultiPolygon]:
+    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
+        list[shapely.Geometry], MultiPolygon]:
         raise NotImplementedError("Must override method")
 
 
 class GridBathymetry(Grid):
-
     LAYER_NAME = "GridBathymetry"
 
     LATITUDE_LINE_DIST = 20
@@ -170,8 +170,8 @@ class GridBathymetry(Grid):
 
         return ([], exclusion_zones)
 
-class GridLabels(Grid):
 
+class GridLabels(Grid):
     LAYER_NAME = "GridLabels"
 
     LATITUDE_LINE_DIST = 20
@@ -203,20 +203,6 @@ class GridLabels(Grid):
         self.hfont.load_default_font("futural")
         self.hfont.normalize_rendering(self.FONT_SIZE)
 
-        # hfont_large = HersheyFonts()
-        # hfont_large.load_default_font("futuram")
-        # hfont_large.normalize_rendering(FONT_SIZE_LARGE)
-
-    def _get_text(self, font, text):
-
-        lines_raw = font.lines_for_text(text)
-        # lines_restructured = []
-        # for (x1, y1), (x2, y2) in lines_raw:
-        #     lines_restructured.append([[x1, y1], [x2, y2]])
-        # lines = MultiLineString(lines_restructured)
-
-        return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
-
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
 
         gridlines = self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
@@ -235,7 +221,7 @@ class GridLabels(Grid):
             if line_label > +180:
                 line_label = line_label - 360
 
-            lines = self._get_text(self.hfont, f"{line_label}")
+            lines = hershey_text_to_lines(self.hfont, f"{line_label}")
 
             lon_line = LineString([[lon, -90], [lon, +90]])
             lon_line = shapely.segmentize(lon_line, self.LAT_LON_MIN_SEGMENT_LENGTH)
@@ -266,8 +252,8 @@ class GridLabels(Grid):
 
             intersect_point_bottom = lon_line.intersection(
                 LineString([
-                    [0, document_info.height-self.OFFSET_BOTTOM+self.FONT_SIZE],
-                    [document_info.width, document_info.height-self.OFFSET_BOTTOM+self.FONT_SIZE]
+                    [0, document_info.height - self.OFFSET_BOTTOM + self.FONT_SIZE],
+                    [document_info.width, document_info.height - self.OFFSET_BOTTOM + self.FONT_SIZE]
                 ])
             )
 
@@ -284,7 +270,7 @@ class GridLabels(Grid):
 
         for lat in lats:
 
-            lines = self._get_text(self.hfont, f"{lat}")
+            lines = hershey_text_to_lines(self.hfont, f"{lat}")
 
             min_lon = -180
             max_lon = 180
@@ -334,12 +320,11 @@ class GridLabels(Grid):
             center_offset = envelope(lines).centroid.xy
 
             mat_font = document_info.get_transformation_matrix_font(
-                xoff=intersect_point_right.x - center_offset[0][0]*2,
+                xoff=intersect_point_right.x - center_offset[0][0] * 2,
                 yoff=intersect_point_right.y + center_offset[1][0]
             )
 
             labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
-
 
         # return gridlines + labels
         return labels
