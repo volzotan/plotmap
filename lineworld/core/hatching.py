@@ -1,11 +1,12 @@
 import math
 from dataclasses import dataclass
 from enum import Enum
+import random
 
 import numpy as np
 import shapely
 from shapely.geometry import MultiLineString, LineString, MultiPoint
-from shapely import Geometry
+from shapely import Geometry, transform
 
 from lineworld.util.geometrytools import unpack_multilinestring
 
@@ -73,6 +74,16 @@ def _combine(g: Geometry, hatch_lines: MultiLineString) -> MultiLineString:
     lines = lines[~shapely.is_empty(lines)]
     return MultiLineString(lines.tolist())
 
+def _randomize(g: Geometry) -> Geometry:
+    def random_transform(x):
+        rng = np.random.default_rng()
+        rng.standard_normal(x.shape)
+        return x + rng.standard_normal(x.shape)/4
+
+    return transform(g, random_transform)
+
+def _segmentize(g: Geometry) -> Geometry:
+    return shapely.segmentize(g, 25)
 
 def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: HatchingOptions) -> MultiLineString | None:
 
@@ -84,7 +95,8 @@ def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: Hat
 
     hatch_lines = _create_hatch_lines(bbox, hatching_options.distance, hatching_options.direction)
 
-    sg = shapely.simplify(g, hatching_options.distance/2)
+    # sg = shapely.simplify(g, hatching_options.distance/2)
+    sg = g #g.buffer(1)
 
     if shapely.is_empty(sg):
         return None
@@ -92,4 +104,5 @@ def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: Hat
     if shapely.is_valid(sg):
         sg = shapely.make_valid(sg)
 
-    return _combine(sg, hatch_lines)
+    # return _combine(sg, hatch_lines)
+    return _randomize(_segmentize(_combine(sg, hatch_lines)))
