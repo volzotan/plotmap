@@ -115,12 +115,20 @@ def process_polygons(
 
     return polys
 
+
 def hershey_text_to_lines(font: HersheyFonts, text: str) -> MultiLineString:
+    lines_raw = font.lines_for_text(text)
+    # lines_restructured = []
+    # for (x1, y1), (x2, y2) in lines_raw:
+    #     lines_restructured.append([[x1, y1], [x2, y2]])
+    # lines = MultiLineString(lines_restructured)
 
-        lines_raw = font.lines_for_text(text)
-        # lines_restructured = []
-        # for (x1, y1), (x2, y2) in lines_raw:
-        #     lines_restructured.append([[x1, y1], [x2, y2]])
-        # lines = MultiLineString(lines_restructured)
+    return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
 
-        return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
+
+def add_to_exclusion_zones(drawing_geometries: list[Geometry], exclusion_zones: MultiPolygon, exclude_buffer: float,
+                           simplification_tolerance: float = 0.1) -> MultiPolygon:
+    cutting_tool = shapely.unary_union(np.array(drawing_geometries))
+    cutting_tool = cutting_tool.buffer(exclude_buffer)
+    cutting_tool = shapely.simplify(cutting_tool, simplification_tolerance)
+    return shapely.union(exclusion_zones, cutting_tool)

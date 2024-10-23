@@ -17,7 +17,7 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.util.geometrytools import hershey_text_to_lines
+from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
 
 
 @dataclass
@@ -71,7 +71,7 @@ class Grid(Layer):
         return minmax_lat, minmax_lon
 
     def _get_gridpositions(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> \
-    tuple[list[float], list[float]]:
+            tuple[list[float], list[float]]:
 
         minmax_lat, minmax_lon = self._get_gridminmax(document_info)
 
@@ -133,7 +133,7 @@ class GridBathymetry(Grid):
     LATITUDE_LINE_DIST = 20
     LONGITUDE_LINE_DIST = 20
 
-    EXCLUDE_BUFFER = 0.3
+    EXCLUDE_BUFFER_DISTANCE = 0.3
 
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
@@ -163,10 +163,8 @@ class GridBathymetry(Grid):
             drawing_geometries = [to_shape(row.lines) for row in result]
 
         # extend extrusion zones
-        cutting_tool = shapely.unary_union(np.array(drawing_geometries))
-        cutting_tool = cutting_tool.buffer(self.EXCLUDE_BUFFER)
-        cutting_tool = shapely.simplify(cutting_tool, document_info.tolerance)
-        exclusion_zones = shapely.union(exclusion_zones, cutting_tool)
+        exclusion_zones = add_to_exclusion_zones(
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
 
         return ([], exclusion_zones)
 
@@ -177,7 +175,7 @@ class GridLabels(Grid):
     LATITUDE_LINE_DIST = 20
     LONGITUDE_LINE_DIST = 20
 
-    EXCLUDE_BUFFER = 2.0
+    EXCLUDE_BUFFER_DISTANCE = 2.0
 
     FONT_SIZE = 5
 
@@ -346,9 +344,7 @@ class GridLabels(Grid):
             drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
 
         # extend extrusion zones
-        cutting_tool = shapely.unary_union(np.array(drawing_geometries))
-        cutting_tool = cutting_tool.buffer(self.EXCLUDE_BUFFER)
-        cutting_tool = shapely.simplify(cutting_tool, document_info.tolerance)
-        exclusion_zones = shapely.union(exclusion_zones, cutting_tool)
+        exclusion_zones = add_to_exclusion_zones(
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
 
         return (drawing_geometries_cut, exclusion_zones)

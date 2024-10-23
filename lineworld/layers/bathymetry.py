@@ -82,8 +82,6 @@ class Bathymetry(ElevationLayer):
         Returns (drawing geometries, exclusion polygons)
         """
 
-        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
-
         drawing_geometries = []
         with self.db.begin() as conn:
             if select_elevation_level is None:
@@ -104,11 +102,14 @@ class Bathymetry(ElevationLayer):
 
                 drawing_geometries = [to_shape(WKBElement(row.lines)) for row in result]
 
-        # remove extrusion zones
+        # cut extrusion_zones into drawing_geometries
+
         drawing_geometries_cut = []
+        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
         for g in drawing_geometries:
-            # drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
             drawing_geometries_cut.append(shapely.intersection(g, stencil))
+
+        # and do not add anything to exclusion_zones
 
         return (drawing_geometries_cut, exclusion_zones)
 

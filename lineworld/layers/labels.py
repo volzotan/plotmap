@@ -26,7 +26,8 @@ from sqlalchemy import text
 
 from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
 from lineworld.util import downloader
-from lineworld.util.geometrytools import process_polygons, unpack_multipolygon, hershey_text_to_lines
+from lineworld.util.geometrytools import process_polygons, unpack_multipolygon, hershey_text_to_lines, \
+    add_to_exclusion_zones
 
 
 @dataclass
@@ -58,7 +59,7 @@ class Labels(Layer):
     LAT_LON_PRECISION = 0.01
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
 
-    BUFFER_DISTANCE = 2
+    EXCLUDE_BUFFER_DISTANCE = 2
 
     FONT_SIZE = 12
 
@@ -105,8 +106,6 @@ class Labels(Layer):
             data = json.load(f)
 
             for label_data in data["labels"]:
-                print(label_data)
-
                 pos = shapely.ops.transform(project_func, Point(reversed(label_data[0])))
                 pos = affine_transform(pos, mat)
 
@@ -154,5 +153,10 @@ class Labels(Layer):
 
             viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
             viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
+            drawing_geometries = viewport_lines.tolist()
 
-        return (viewport_lines.tolist(), exclusion_zones)
+        # and add buffered lines to exclusion_zones
+        exclusion_zones = add_to_exclusion_zones(
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+
+        return (drawing_geometries, exclusion_zones)

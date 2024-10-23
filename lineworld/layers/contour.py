@@ -1,3 +1,4 @@
+import numpy as np
 import shapely
 from core.maptools import DocumentInfo
 import geoalchemy2
@@ -66,12 +67,22 @@ class Contour(ElevationLayer):
         Returns (drawing geometries, exclusion polygons)
         """
 
+        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
+
         drawing_geometries = []
         with self.db.begin() as conn:
             result = conn.execute(select(self.map_lines_table))
             drawing_geometries = [to_shape(row.lines) for row in result]
 
+            viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
+            viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
+            drawing_geometries = viewport_lines.tolist()
+
+        # do not extend extrusion zones
+
         return (drawing_geometries, exclusion_zones)
+
+
 
     def out_polygons(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo,
                      select_elevation_level: int | None = None) -> tuple[

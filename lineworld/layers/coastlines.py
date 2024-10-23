@@ -307,8 +307,11 @@ class Coastlines(Layer):
 
             viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
             viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
+            drawing_geometries = viewport_lines.tolist()
 
-        return (viewport_lines.tolist(), exclusion_zones)
+        # do not extend extrusion zones
+
+        return (drawing_geometries, exclusion_zones)
 
     def project2(self, document_info: DocumentInfo) -> list[CoastlineLines]:
         with self.db.begin() as conn:

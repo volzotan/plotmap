@@ -84,12 +84,11 @@ if __name__ == "__main__":
 
     draw_cities_labels, exclude = layer_cities_labels.out(exclude, document_info)
     draw_cities_circles, exclude = layer_cities_circles.out(exclude, document_info)
-
     draw_grid_labels, exclude = layer_grid_labels.out(exclude, document_info)
     draw_labels, exclude = layer_labels.out(exclude, document_info)
     draw_coastlines, exclude = layer_coastlines.out(exclude, document_info)
-    # draw_contour, exclude = layer_contour.out(exclude, document_info)
-    # _, exclude = layer_grid_bathymetry.out(exclude, document_info)
+    draw_contour, exclude = layer_contour.out(exclude, document_info)
+    _, exclude = layer_grid_bathymetry.out(exclude, document_info)
     draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
 
     svg = SvgWriter("test.svg", [document_info.width, document_info.height])
@@ -166,8 +165,8 @@ if __name__ == "__main__":
 
     svg.add_style("coastlines", options_coastlines)
 
-    # svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
-    # svg.add("contour", draw_contour, options=options_contour)
+    svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
+    svg.add("contour", draw_contour, options=options_contour)
     svg.add("coastlines", draw_coastlines)
     svg.add("labels", draw_labels, options=options_labels)
     svg.add("grid_labels", draw_grid_labels, options=options_grid)

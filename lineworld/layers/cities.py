@@ -21,7 +21,7 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.util.geometrytools import hershey_text_to_lines
+from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
 
 
 @dataclass
@@ -58,7 +58,7 @@ class Cities(Layer):
     FONT_SIZE = 5
     CITY_CIRCLE_RADIUS = 2
 
-    BUFFER_DISTANCE = 2
+    EXCLUDE_BUFFER_DISTANCE = 2
 
     def __init__(self, layer_label: str, db: engine.Engine) -> None:
         super().__init__(layer_label, db)
@@ -168,8 +168,13 @@ class Cities(Layer):
 
             viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
             viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
+            drawing_geometries = viewport_lines.tolist()
 
-        return (viewport_lines.tolist(), exclusion_zones)
+        # and add buffered lines to exclusion_zones
+        exclusion_zones = add_to_exclusion_zones(
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+
+        return (drawing_geometries, exclusion_zones)
 
 
 class CitiesLabels(Cities):
