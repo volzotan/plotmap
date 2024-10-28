@@ -1,12 +1,8 @@
 from pathlib import Path
+
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-import numpy as np
-from pathlib import Path
-import cv2
-import numpy as np
-from shapely import LineString, Polygon, MultiPolygon
+from shapely import LineString, Polygon, MultiPolygon, MultiLineString
 
 from experiments.hatching.slope import get_slope
 from lineworld.core.hatching import HatchingOptions, HatchingDirection, create_hatching
@@ -15,12 +11,13 @@ from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 from lineworld.util.geometrytools import unpack_multipolygon
 
-INPUT_FILE = Path("data/hatching_dem.tif")
+INPUT_FILE = Path("experiments/hatching/data/hatching_dem.tif")
 # INPUT_FILE = Path("data/gebco_crop.tif")
+OUTPUT_PATH = Path("experiments/hatching/output")
 
 LEVELS = 10
-DISTANCES = [2.5 + x*0.9 for x in range(LEVELS)]
-BOUNDS = get_elevation_bounds([0, 255], LEVELS)
+DISTANCES = [2.5 + x * 0.9 for x in range(LEVELS)]
+BOUNDS = get_elevation_bounds([0, 20], LEVELS)
 
 
 def read_data(input_path: Path) -> np.ndarray:
@@ -34,11 +31,11 @@ def read_data(input_path: Path) -> np.ndarray:
     return data
 
 
-def standard_hatching():
-    hatchings = []
+def standard_hatching(data: np.ndarray) -> list[MultiLineString | LineString]:
+    output = []
 
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(img, *BOUNDS[i], False)
+        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
 
         polygons = []
         for g in extracted_geometries:
@@ -50,13 +47,13 @@ def standard_hatching():
         hatching_options.direction = HatchingDirection.ANGLE_45
 
         for p in polygons:
-            hatchings += [create_hatching(p, None, hatching_options)]
-            # hatchings += create_hatching_2(p, None, hatching_options)
+            output += [create_hatching(p, None, hatching_options)]
+            # output += create_hatching_2(p, None, hatching_options)
 
-    return hatchings
+    return output
 
-def standard_hatching_concentric():
 
+def standard_hatching_concentric(data: np.ndarray) -> list[MultiLineString | LineString]:
     def create_hatching2(g: Polygon | MultiPolygon, bbox: list[float], options: HatchingOptions) -> list[LineString]:
         lines = []
 
@@ -75,10 +72,10 @@ def standard_hatching_concentric():
 
         return lines
 
-    hatchings = []
+    output = []
 
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(img, *BOUNDS[i], False)
+        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
 
         polygons = []
         for g in extracted_geometries:
@@ -90,9 +87,10 @@ def standard_hatching_concentric():
         hatching_options.direction = HatchingDirection.ANGLE_45
 
         for p in polygons:
-            hatchings += create_hatching2(p, None, hatching_options)
+            output += create_hatching2(p, None, hatching_options)
 
-    return hatchings
+    return output
+
 
 if __name__ == "__main__":
 
@@ -102,21 +100,19 @@ if __name__ == "__main__":
 
     X, Y, dX, dY = get_slope(data, 10)
 
-
     experiments_table = {
         "hatching_a": standard_hatching,
         "hatching_a_concentric": standard_hatching_concentric,
     }
 
     for k, v in experiments_table.items():
-
-        hatchings = v()
+        hatchings = v(data)
 
         doc = DocumentInfo()
         doc.width = 1000
         doc.height = 1000
 
-        svg = SvgWriter(f"{k}.svg", [doc.width, doc.height])
+        svg = SvgWriter(Path(OUTPUT_PATH, f"{k}.svg"), [doc.width, doc.height])
         svg.background_color = "white"
 
         options = {
