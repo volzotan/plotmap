@@ -1,25 +1,37 @@
 from pathlib import Path
 import cv2
-
+import numpy as np
+from matplotlib import pyplot as plt
+import numpy as np
+from pathlib import Path
+import cv2
 import numpy as np
 from shapely import LineString, Polygon, MultiPolygon
 
+from experiments.hatching.slope import get_slope
 from lineworld.core.hatching import HatchingOptions, HatchingDirection, create_hatching
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 from lineworld.util.geometrytools import unpack_multipolygon
 
-INPUT_FILE = Path("experiments/hatching_test_pattern.png")
-
-img = cv2.imread(str(INPUT_FILE), cv2.IMREAD_GRAYSCALE)
-img = cv2.resize(img, [1000, 1000])
-
-hatchings = []
+INPUT_FILE = Path("data/hatching_dem.tif")
+# INPUT_FILE = Path("data/gebco_crop.tif")
 
 LEVELS = 10
 DISTANCES = [2.5 + x*0.9 for x in range(LEVELS)]
 BOUNDS = get_elevation_bounds([0, 255], LEVELS)
+
+
+def read_data(input_path: Path) -> np.ndarray:
+    data = cv2.imread(str(input_path), cv2.IMREAD_UNCHANGED)
+    # data = cv2.resize(img, [30, 30])
+
+    # data = np.flipud(data)
+    # data = (data * 120/20).astype(np.int8)
+    # data = np.rot90(data)
+
+    return data
 
 
 def standard_hatching():
@@ -43,7 +55,7 @@ def standard_hatching():
 
     return hatchings
 
-def standard_hatching2():
+def standard_hatching_concentric():
 
     def create_hatching2(g: Polygon | MultiPolygon, bbox: list[float], options: HatchingOptions) -> list[LineString]:
         lines = []
@@ -82,23 +94,37 @@ def standard_hatching2():
 
     return hatchings
 
+if __name__ == "__main__":
 
-hatchings = standard_hatching()
-# hatchings = standard_hatching2()
+    data = read_data(INPUT_FILE)
 
-doc = DocumentInfo()
-doc.width = 1000
-doc.height = 1000
+    print(f"data {INPUT_FILE} min: {np.min(data)} / max: {np.max(data)}")
 
-svg = SvgWriter("hatching.svg", [doc.width, doc.height])
-svg.background_color = "white"
+    X, Y, dX, dY = get_slope(data, 10)
 
-options = {
-    "fill": "none",
-    "stroke": "black",
-    "stroke-width": "2.0",
-}
 
-svg.add("contour", hatchings, options=options)
+    experiments_table = {
+        "hatching_a": standard_hatching,
+        "hatching_a_concentric": standard_hatching_concentric,
+    }
 
-svg.write()
+    for k, v in experiments_table.items():
+
+        hatchings = v()
+
+        doc = DocumentInfo()
+        doc.width = 1000
+        doc.height = 1000
+
+        svg = SvgWriter(f"{k}.svg", [doc.width, doc.height])
+        svg.background_color = "white"
+
+        options = {
+            "fill": "none",
+            "stroke": "black",
+            "stroke-width": "2.0",
+        }
+
+        svg.add("contour", hatchings, options=options)
+
+        svg.write()
