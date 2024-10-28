@@ -9,19 +9,18 @@ from shapely import Geometry, MultiLineString, LineString, Polygon
 class SvgWriter():
     type SvgOptions = dict[str, str | int | float]
 
-    filename: Path
-    dimensions: list[int | float]
-    image: str | None = None
-    background_color: str | None = None
-    offset: list[int | float] = [0, 0]
-
-    layers: dict[str, list[tuple[Geometry, SvgOptions]]] = {}
-
-    styles: dict[str, SvgOptions] = {}
+    layers: dict[str, list[tuple[Geometry, SvgOptions]]]
+    styles: dict[str, SvgOptions]
 
     def __init__(self, filename: Path | str, dimensions: list[float]):
-        self.filename = Path(filename)
-        self.dimensions = dimensions
+        self.filename: Path = Path(filename)
+        self.dimensions: list[int | float] = dimensions
+        self.image: str | None = None
+        self.background_color: str | None = None
+        self.offset: list[int | float] = [0, 0]
+
+        self.layers = {}
+        self.styles = {}
 
     def add_style(self, layer: str, options: SvgOptions):
         if layer not in self.styles:
