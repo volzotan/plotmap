@@ -1,62 +1,74 @@
+from pathlib import Path
+
 import numpy as np
 import trimesh
 from PIL import Image
 
-STL_PATH = "hatching_dem.stl"
-OUTPUT_PATH = "data/hatching_dem.tif"
-# OUTPUT_PATH = "data/hatching_dem.png"
+STL_PATHS = [
+    # "hatching_dem.stl",
+    # "slope_test.stl",
+    # "slope_test_2.stl",
+    # "slope_test_3.stl",
+    "slope_test_4.stl"
+]
+INPUT_PATH = "data"
+OUTPUT_PATH = "data"
 
 INP_DIMENSIONS = [100, 100]
 OUT_DIMENSIONS = [1000, 1000]
 
-mesh = trimesh.load_mesh(STL_PATH)
+for stl in STL_PATHS:
 
-scaler = [
-    OUT_DIMENSIONS[0] / INP_DIMENSIONS[0],
-    OUT_DIMENSIONS[1] / INP_DIMENSIONS[1],
-    1 # 255 / mesh.bounds[1, 2]
-]
+    stl_path = Path(INPUT_PATH, stl)
+    mesh = trimesh.load_mesh(str(stl_path))
 
-xs = np.linspace(0, INP_DIMENSIONS[0], num=OUT_DIMENSIONS[0], endpoint=False)
-ys = np.linspace(0, INP_DIMENSIONS[1], num=OUT_DIMENSIONS[1], endpoint=False)
+    scaler = [
+        OUT_DIMENSIONS[0] / INP_DIMENSIONS[0],
+        OUT_DIMENSIONS[1] / INP_DIMENSIONS[1],
+        1 # 255 / mesh.bounds[1, 2]
+    ]
 
-xv, yv = np.meshgrid(xs, ys)
-zv = np.zeros_like(xv)
-zv.fill(mesh.bounds[1, 2] * 1.10)
+    xs = np.linspace(0, INP_DIMENSIONS[0], num=OUT_DIMENSIONS[0], endpoint=False)
+    ys = np.linspace(0, INP_DIMENSIONS[1], num=OUT_DIMENSIONS[1], endpoint=False)
 
-ray_origins = np.dstack((xv, yv, zv)).reshape([xs.shape[0]*ys.shape[0], 3])
-ray_directions = np.tile(np.array([0, 0, -100]), (ray_origins.shape[0], 1))
+    xv, yv = np.meshgrid(xs, ys)
+    zv = np.zeros_like(xv)
+    zv.fill(mesh.bounds[1, 2] * 1.10)
 
-locations, index_ray, index_tri = mesh.ray.intersects_location(ray_origins=ray_origins, ray_directions=ray_directions)
+    ray_origins = np.dstack((xv, yv, zv)).reshape([xs.shape[0]*ys.shape[0], 3])
+    ray_directions = np.tile(np.array([0, 0, -100]), (ray_origins.shape[0], 1))
 
-output = np.zeros([*OUT_DIMENSIONS], dtype=np.float32)
-# output = np.zeros([*OUT_DIMENSIONS], dtype=np.uint8)
+    locations, index_ray, index_tri = mesh.ray.intersects_location(ray_origins=ray_origins, ray_directions=ray_directions)
 
-for loc in locations:
-    # switch row col / Y axis flip
-    output[(OUT_DIMENSIONS[1]-1)-int(loc[1] * scaler[1]), int(loc[0] * scaler[0])] = loc[2] * scaler[2]
+    output = np.zeros([*OUT_DIMENSIONS], dtype=np.float32)
+    # output = np.zeros([*OUT_DIMENSIONS], dtype=np.uint8)
 
-if OUTPUT_PATH.lower().endswith(".png"):
+    for loc in locations:
+        # switch row col / Y axis flip
+        output[(OUT_DIMENSIONS[1]-1)-int(loc[1] * scaler[1]), int(loc[0] * scaler[0])] = loc[2] * scaler[2]
+
+    output_filename = Path(OUTPUT_PATH, f"{stl_path.stem}.tif")
+    im = Image.fromarray(output, mode='F') # float32
+    im.save(output_filename, "TIFF")
+    print(f"written output file: {output_filename}")
+
+    output_filename = Path(OUTPUT_PATH, f"{stl_path.stem}.png")
     output *= 255.0 / mesh.bounds[1, 2]
     output = output.astype(np.uint8)
     im = Image.fromarray(output)
-    im.save(OUTPUT_PATH, "PNG")
+    im.save(output_filename, "PNG")
+    print(f"written output file: {output_filename}")
 
-if OUTPUT_PATH.lower().endswith(".tif"):
-    im = Image.fromarray(output, mode='F') # float32
-    im.save(OUTPUT_PATH, "TIFF")
-
-
-# ray_visualize = trimesh.load_path(
-#     np.hstack((ray_origins, ray_origins + ray_directions * 5.0)).reshape(-1, 2, 3)
-# )
-#
-# # unmerge so viewer doesn't smooth
-# mesh.unmerge_vertices()
-# # make mesh white- ish
-# mesh.visual.face_colors = [255, 255, 255, 255]
-# mesh.visual.face_colors[index_tri] = [255, 0, 0, 255]
-#
-# scene = trimesh.Scene([mesh, ray_visualize])
-#
-# scene.show()
+    # ray_visualize = trimesh.load_path(
+    #     np.hstack((ray_origins, ray_origins + ray_directions * 5.0)).reshape(-1, 2, 3)
+    # )
+    #
+    # # unmerge so viewer doesn't smooth
+    # mesh.unmerge_vertices()
+    # # make mesh white- ish
+    # mesh.visual.face_colors = [255, 255, 255, 255]
+    # mesh.visual.face_colors[index_tri] = [255, 0, 0, 255]
+    #
+    # scene = trimesh.Scene([mesh, ray_visualize])
+    #
+    # scene.show()

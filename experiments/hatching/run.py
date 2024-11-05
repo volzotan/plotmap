@@ -2,6 +2,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from rasterio.features import rasterize
 from shapely import LineString, Polygon, MultiPolygon, MultiLineString
 
 from experiments.hatching.slope import get_slope
@@ -11,12 +12,14 @@ from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 from lineworld.util.geometrytools import unpack_multipolygon
 
-INPUT_FILE = Path("experiments/hatching/data/hatching_dem.tif")
+# INPUT_FILE = Path("experiments/hatching/data/hatching_dem.tif")
 # INPUT_FILE = Path("data/gebco_crop.tif")
+INPUT_FILE = Path("experiments/hatching/data/slope_test_4.tif")
+
 OUTPUT_PATH = Path("experiments/hatching/output")
 
 LEVELS = 10
-DISTANCES = [2.5 + x * 0.9 for x in range(LEVELS)]
+DISTANCES = [3.0 + x * 0.9 for x in range(LEVELS)]
 BOUNDS = get_elevation_bounds([0, 20], LEVELS)
 
 
@@ -31,7 +34,7 @@ def read_data(input_path: Path) -> np.ndarray:
     return data
 
 
-def standard_hatching(data: np.ndarray) -> list[MultiLineString | LineString]:
+def standard_hatching(data: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
     output = []
 
     for i in range(LEVELS):
@@ -48,12 +51,11 @@ def standard_hatching(data: np.ndarray) -> list[MultiLineString | LineString]:
 
         for p in polygons:
             output += [create_hatching(p, None, hatching_options)]
-            # output += create_hatching_2(p, None, hatching_options)
 
     return output
 
 
-def standard_hatching_concentric(data: np.ndarray) -> list[MultiLineString | LineString]:
+def standard_hatching_concentric(data: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
     def create_hatching2(g: Polygon | MultiPolygon, bbox: list[float], options: HatchingOptions) -> list[LineString]:
         lines = []
 
@@ -84,13 +86,44 @@ def standard_hatching_concentric(data: np.ndarray) -> list[MultiLineString | Lin
         hatching_options = HatchingOptions()
         hatching_options.distance = DISTANCES[i]
         # hatching_options.direction = HatchingDirection.ANGLE_135 if i % 2 == 0 else HatchingDirection.ANGLE_45
-        hatching_options.direction = HatchingDirection.ANGLE_45
+        # hatching_options.direction = HatchingDirection.ANGLE_45
 
         for p in polygons:
             output += create_hatching2(p, None, hatching_options)
 
     return output
 
+def standard_hatching_slope_orientation(data: np.ndarray, angles: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
+    output = []
+
+    for i in range(LEVELS):
+        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
+
+        polygons = []
+        for g in extracted_geometries:
+            polygons += unpack_multipolygon(g)
+
+        for p in polygons:
+
+            mask = rasterize([p.buffer(-10
+                                       )], out_shape=angles.shape)
+
+            # angles_debug = angles*(255/np.max(angles))
+            # angles_debug[mask <= 0] = 0
+            # cv2.imwrite("test.png", angles_debug)
+
+
+            angle = np.degrees(np.mean(angles[mask > 0]))
+
+            print(angle)
+
+            hatching_options = HatchingOptions()
+            hatching_options.distance = DISTANCES[i]
+            hatching_options.angle = angle
+
+            output += [create_hatching(p, None, hatching_options)]
+
+    return output
 
 if __name__ == "__main__":
 
@@ -98,15 +131,16 @@ if __name__ == "__main__":
 
     print(f"data {INPUT_FILE} min: {np.min(data)} / max: {np.max(data)}")
 
-    X, Y, dX, dY = get_slope(data, 10)
+    X, Y, dX, dY, angles, inclination = get_slope(data, 10)
 
     experiments_table = {
         "hatching_a": standard_hatching,
         "hatching_a_concentric": standard_hatching_concentric,
+        "hatching_c": standard_hatching_slope_orientation,
     }
 
     for k, v in experiments_table.items():
-        hatchings = v(data)
+        hatchings = v(data, angles=angles)
 
         doc = DocumentInfo()
         doc.width = 1000

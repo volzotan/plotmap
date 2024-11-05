@@ -5,8 +5,9 @@ import random
 
 import numpy as np
 import shapely
+from shapely.affinity import affine_transform
 from shapely.geometry import MultiLineString, LineString, MultiPoint
-from shapely import Geometry, transform
+from shapely import Geometry, transform, affinity
 
 from lineworld.util.geometrytools import unpack_multilinestring
 
@@ -22,12 +23,53 @@ class HatchingDirection(Enum):
 class HatchingOptions():
     angle: float = 45.
     distance: float = 2.0
-    direction: HatchingDirection = HatchingDirection.ANGLE_45
+    # direction: HatchingDirection = HatchingDirection.ANGLE_45
     lift: bool = True
     wiggle: float = 0.
 
 
-def _create_hatch_lines(bbox: list[float], distance: float, direction: HatchingDirection) -> MultiLineString:
+# def _create_hatch_lines(bbox: list[float], distance: float, direction: HatchingDirection) -> MultiLineString:
+#     """
+#     Note: distance is measured along an axis, not distance between parallel hatching lines
+#     (if hatching is done at an angle, for example 45°)
+#     """
+#
+#     minx, miny, maxx, maxy = bbox
+#
+#     minx = distance * math.floor(minx / distance)
+#     miny = distance * math.floor(miny / distance)
+#     maxx = distance * math.ceil(maxx / distance)
+#     maxy = distance * math.ceil(maxy / distance)
+#
+#     num_x = int(round(maxx - minx) / distance)
+#     num_y = int(round(maxy - miny) / distance)
+#
+#     # lines = np.empty([num_x + num_y + 2], dtype=Geometry)
+#     lines = []
+#     offset = -(maxx - minx)
+#
+#     match direction:
+#         case HatchingDirection.ANGLE_45:
+#             for i in range(num_x + num_y + 1):
+#                 start = [minx, miny + i * distance]
+#                 end = [maxx, start[1] + offset]
+#                 lines.append(LineString([start, end]))
+#                 # lines[i] = LineString([start, end])
+#
+#         case HatchingDirection.ANGLE_135:
+#             for i in range(num_x + num_y + 1):
+#                 start = [maxx, miny + i * distance]
+#                 end = [minx, start[1] + offset]
+#                 lines.append(LineString([start, end]))
+#                 # lines[i] = LineString([start, end])
+#
+#         case _:
+#             raise Exception(f"unknown hatching direction: {direction}")
+#
+#     return MultiLineString(lines)
+
+
+def _create_hatch_lines(bbox: list[float], distance: float, angle: float) -> MultiLineString:
     """
     Note: distance is measured along an axis, not distance between parallel hatching lines
     (if hatching is done at an angle, for example 45°)
@@ -40,32 +82,24 @@ def _create_hatch_lines(bbox: list[float], distance: float, direction: HatchingD
     maxx = distance * math.ceil(maxx / distance)
     maxy = distance * math.ceil(maxy / distance)
 
-    num_x = int(round(maxx - minx) / distance)
-    num_y = int(round(maxy - miny) / distance)
+    diag = math.sqrt((maxx-minx)**2 + (maxy-miny)**2)
 
-    # lines = np.empty([num_x + num_y + 2], dtype=Geometry)
+    num = round(diag // distance)
+
     lines = []
-    offset = -(maxx - minx)
 
-    match direction:
-        case HatchingDirection.ANGLE_45:
-            for i in range(num_x + num_y + 1):
-                start = [minx, miny + i * distance]
-                end = [maxx, start[1] + offset]
-                lines.append(LineString([start, end]))
-                # lines[i] = LineString([start, end])
+    for i in range(num):
+        offset = (distance*i)-diag/2
+        start = [-diag, offset]
+        end = [+diag, offset]
+        lines.append(LineString([start, end]))
 
-        case HatchingDirection.ANGLE_135:
-            for i in range(num_x + num_y + 1):
-                start = [maxx, miny + i * distance]
-                end = [minx, start[1] + offset]
-                lines.append(LineString([start, end]))
-                # lines[i] = LineString([start, end])
+    mls = MultiLineString(lines)
 
-        case _:
-            raise Exception(f"unknown hatching direction: {direction}")
+    mls = affinity.rotate(mls, angle)
+    mls = affinity.translate(mls, xoff=minx+(maxx-minx)/2, yoff=miny+(maxy-miny)/2)
 
-    return lines
+    return mls
 
 
 def _combine(g: Geometry, hatch_lines: MultiLineString) -> MultiLineString:
@@ -93,7 +127,8 @@ def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: Hat
         bp = MultiPoint(g.exterior.coords).envelope
         bbox = [*bp.exterior.coords[0], *bp.exterior.coords[2]]
 
-    hatch_lines = _create_hatch_lines(bbox, hatching_options.distance, hatching_options.direction)
+    # hatch_lines = _create_hatch_lines(bbox, hatching_options.distance, hatching_options.direction)
+    hatch_lines = _create_hatch_lines(bbox, hatching_options.distance, hatching_options.angle)
 
     # sg = shapely.simplify(g, hatching_options.distance/2)
     sg = g #g.buffer(1)
@@ -104,5 +139,5 @@ def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: Hat
     if shapely.is_valid(sg):
         sg = shapely.make_valid(sg)
 
-    # return _combine(sg, hatch_lines)
-    return _randomize(_segmentize(_combine(sg, hatch_lines)))
+    return _combine(sg, hatch_lines)
+    # return _randomize(_segmentize(_combine(sg, hatch_lines)))
