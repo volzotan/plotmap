@@ -9,7 +9,8 @@ STL_PATHS = [
     # "slope_test.stl",
     # "slope_test_2.stl",
     # "slope_test_3.stl",
-    "slope_test_4.stl"
+    # "slope_test_4.stl",
+    "slope_test_5.stl"
 ]
 INPUT_PATH = "data"
 OUTPUT_PATH = "data"
@@ -53,7 +54,12 @@ for stl in STL_PATHS:
     print(f"written output file: {output_filename}")
 
     output_filename = Path(OUTPUT_PATH, f"{stl_path.stem}.png")
-    output *= 255.0 / mesh.bounds[1, 2]
+
+    scale = (255-0) / (mesh.bounds[1, 2]-mesh.bounds[0, 2])
+    offset = 0-mesh.bounds[0, 2]
+    output *= scale
+    output += offset
+
     output = output.astype(np.uint8)
     im = Image.fromarray(output)
     im.save(output_filename, "PNG")
