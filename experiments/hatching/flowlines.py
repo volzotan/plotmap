@@ -1,3 +1,4 @@
+import cProfile as profile
 import datetime
 import math
 from collections import deque
@@ -14,18 +15,20 @@ from experiments.hatching.slope import get_slope
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 
-# INPUT_FILE = Path("experiments/hatching/data/slope_test_5.tif")
 # INPUT_FILE = Path("experiments/hatching/data/gebco_crop.tif")
 
 ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/reproject.tif")
 DENSITY_FILE = Path("shaded_relief4.png")
+TARGET_RESOLUTION = [20000, 20000]
+
+# ELEVATION_FILE = Path("experiments/hatching/data/slope_test_5.tif")
+# DENSITY_FILE = ELEVATION_FILE
+# TARGET_RESOLUTION = [1000, 1000]
 
 OUTPUT_PATH = Path("experiments/hatching/output")
 
-TARGET_RESOLUTION = [50000, 50000]
-
 LINE_DISTANCE = [2, 40]  # distance between lines
-LINE_STEP_DISTANCE = 2.0  # distance between points constituting a line
+LINE_STEP_DISTANCE = 1.0  # distance between points constituting a line
 MAX_ANGLE_DISCONTINUITY = 0  # max difference (in radians) in slope between line points
 MIN_INCLINATION = 0.1  # 50.0
 
@@ -34,6 +37,7 @@ LINE_MAX_SEGMENTS = 100
 
 BLUR_ANGLES = False
 BLUR_DENSITY_MAP = False
+
 
 class FlowlineHatcher():
 
@@ -47,7 +51,8 @@ class FlowlineHatcher():
         self.density = np.pad(density, (1, 1), "edge")[1:, 1:]
 
         self.bbox = self.polygon.bounds
-        self.bbox = [0, 0, math.ceil(self.bbox[2]-self.bbox[0]), math.ceil(self.bbox[3]-self.bbox[1])] # minx, miny, maxx, maxy
+        self.bbox = [0, 0, math.ceil(self.bbox[2] - self.bbox[0]),
+                     math.ceil(self.bbox[3] - self.bbox[1])]  # minx, miny, maxx, maxy
 
         if BLUR_ANGLES:
             self.angles = cv2.blur(self.angles, (60, 60))
@@ -57,28 +62,29 @@ class FlowlineHatcher():
             self.density = cv2.blur(self.density, (60, 60))
 
         self.point_map = {}
-        for x in range(self.bbox[2]+1):
-            for y in range(self.bbox[3]+1):
+        for x in range(self.bbox[2] + 1):
+            for y in range(self.bbox[3] + 1):
                 self.point_map[f"{x},{y}"] = []
 
-        self.point_raster = np.zeros([self.bbox[3]+1, self.bbox[2]+1], dtype=bool)
+        self.point_raster = np.zeros([self.bbox[3] + 1, self.bbox[2] + 1], dtype=bool)
 
     def _collision_approximate(self, x: float, y: float) -> bool:
-        x = round(x)
-        y = round(y)
-        half_d = round(self.density[y, x] / 2)
+        x = int(x)
+        y = int(y)
+        half_d = int(self.density[y, x] / 2)
 
-        return np.any(self.point_raster[
-                      max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
-                      max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
-                      ])
-
+        return np.any(
+            self.point_raster[
+                max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
+                max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
+            ]
+        )
 
     def _collision_precise(self, x: float, y: float) -> bool:
         rx = round(x)
         ry = round(y)
-        d = round(self.density[ry, rx])
-        half_d = round(d / 2)
+        d = self.density[ry, rx]
+        half_d = math.ceil(d / 2)
 
         x_minmax = [max(rx - half_d, 0), min(rx + half_d, self.point_raster.shape[1])]
         y_minmax = [max(ry - half_d, 0), min(ry + half_d, self.point_raster.shape[0])]
@@ -86,7 +92,7 @@ class FlowlineHatcher():
         for ix in range(*x_minmax):
             for iy in range(*y_minmax):
                 for p in self.point_map[f"{ix},{iy}"]:
-                    if math.sqrt((p[0]-x)**2 + (p[1]-y)**2) < d:
+                    if math.sqrt((p[0] - x) ** 2 + (p[1] - y) ** 2) < d:
                         return True
 
         return False
@@ -97,8 +103,8 @@ class FlowlineHatcher():
 
     def _next_point(self, x1: float, y1: float, forwards: bool) -> float:
 
-        rx1 = round(x1)
-        ry1 = round(y1)
+        rx1 = int(x1)
+        ry1 = int(y1)
 
         a1 = self.angles[ry1, rx1]
         inc = self.inclination[ry1, rx1]
@@ -113,20 +119,22 @@ class FlowlineHatcher():
         x2 = x1 + LINE_STEP_DISTANCE * math.cos(a1) * dir
         y2 = y1 + LINE_STEP_DISTANCE * math.sin(a1) * dir
 
-        if not self.polygon.contains(Point([x2, y2])):
+        # if not self.polygon.contains(Point(x2, y2)):
+        #     return None
+
+        if x2 < 0 or x2 > self.bbox[2] or y2 < 0 or y2 > self.bbox[3]: # TODO
             return None
 
         if self._collision(x2, y2):
             return None
 
         if MAX_ANGLE_DISCONTINUITY > 0:
-            a2 = self.angles[round(y2), round(x2)]
+            a2 = self.angles[int(y2), int(x2)]
 
             if abs(a2 - a1) > MAX_ANGLE_DISCONTINUITY:
                 return None
 
         return (x2, y2)
-
 
     def _seed_points(self, line_points: list[tuple[float, float]]) -> list[tuple[float, float]]:
         num_seedpoints = 1
@@ -146,19 +154,21 @@ class FlowlineHatcher():
             a1 = math.atan2(y1 - y3, x1 - x3)
 
             a2 = a1
-
             if i % 2 == 0:
                 a2 += math.radians(90)
             else:
                 a2 -= math.radians(90)
 
-            x4 = self.density[round(y3), round(x3)]
+            x4 = self.density[int(y3), int(x3)]
             y4 = 0
 
             x5 = x4 * math.cos(a2) - y4 * math.sin(a2) + x3
             y5 = x4 * math.sin(a2) + y4 * math.cos(a2) + y3
 
-            if not self.polygon.contains(Point([x5, y5])):
+            # if not self.polygon.contains(Point([x5, y5])):
+            #     continue
+
+            if x5 < 0 or x5 > self.bbox[2] or y5 < 0 or y5 > self.bbox[3]:  # TODO
                 continue
 
             seed_points.append([x5, y5])
@@ -201,7 +211,6 @@ class FlowlineHatcher():
         # output_filename = f"flowlines_BLURANGLES-{BLUR_ANGLES}_BLURDENSITY-{BLUR_DENSITY_MAP}.png"
         # cv2.imwrite(Path(OUTPUT_PATH, output_filename), output)
 
-
     def hatch(self) -> list[LineString]:
 
         # output = np.zeros([1000, 1000, 3], dtype=np.uint8)
@@ -209,7 +218,7 @@ class FlowlineHatcher():
         linestrings = []
         starting_points = deque()
 
-        for i in np.linspace(self.bbox[0]+1, self.bbox[2] - 1, num=100):
+        for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, num=100):
             for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, num=100):
                 starting_points.append([i, j])
 
@@ -259,8 +268,8 @@ class FlowlineHatcher():
 
             # collision checks
             for lp in line_points:
-                x = round(lp[0])
-                y = round(lp[1])
+                x = int(lp[0])
+                y = int(lp[1])
                 # self.point_map[f"{x},{y}"].append(lp)
                 self.point_raster[y, x] = True
 
@@ -290,12 +299,16 @@ if __name__ == "__main__":
 
     logger.debug(f"data {ELEVATION_FILE} min: {np.min(data)} | max: {np.max(data)}")
 
-    density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+    density_data = None
+    if DENSITY_FILE.suffix.endswith("tif"):
+        density_data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
+    else:
+        density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
     if not density_data.shape == data.shape:
         density_data = cv2.resize(density_data, data.shape)
 
     # CROP
-    CROP_SIZE = [4000, 4000]
+    CROP_SIZE = [2000, 2000]
     data = data[
            TARGET_RESOLUTION[1] // 2 - CROP_SIZE[1] // 2:TARGET_RESOLUTION[1] // 2 + CROP_SIZE[1] // 2,
            TARGET_RESOLUTION[0] // 2 - CROP_SIZE[0] // 2:TARGET_RESOLUTION[0] // 2 + CROP_SIZE[0] // 2]
@@ -304,14 +317,22 @@ if __name__ == "__main__":
            TARGET_RESOLUTION[0] // 2 - CROP_SIZE[0] // 2:TARGET_RESOLUTION[0] // 2 + CROP_SIZE[0] // 2]
 
     density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
-    density = np.full(density_data.shape, LINE_DISTANCE[0], dtype=float) + (density_normalized * (LINE_DISTANCE[1] - LINE_DISTANCE[0]))
+    density = np.full(density_data.shape, LINE_DISTANCE[0], dtype=float) + (
+                density_normalized * (LINE_DISTANCE[1] - LINE_DISTANCE[0]))
 
     X, Y, dX, dY, angles, inclination = get_slope(data, 10)
 
     timer = datetime.datetime.now()
 
     hatcher = FlowlineHatcher(shapely.box(0, 0, data.shape[1], data.shape[0]), data, angles, inclination, density)
+
+    pr = profile.Profile()
+    pr.enable()
+
     linestrings = hatcher.hatch()
+
+    pr.disable()
+    pr.dump_stats("profile.pstat")
 
     total_time = (datetime.datetime.now() - timer).total_seconds()
     avg_line_length = sum([x.length for x in linestrings]) / len(linestrings)
