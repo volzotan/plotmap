@@ -13,16 +13,6 @@ from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 from lineworld.util.geometrytools import unpack_multipolygon
 
-
-# INPUT_FILE = Path("data/hatching_dem.tif")
-# INPUT_FILE = Path("data/gebco_crop.tif")
-# INPUT_FILE = Path("data/slope_test_2.tif")
-INPUT_FILE = Path("data/slope_test_4.tif")
-
-OUTPUT_PATH = Path("output")
-
-SAMPLING_STEP = 5
-
 def _read_data(input_path: Path) -> np.ndarray:
     data = cv2.imread(str(input_path), cv2.IMREAD_UNCHANGED)
     # data = cv2.resize(img, [30, 30])
@@ -38,18 +28,32 @@ def _unlog(x, n: float = 10) -> float:
 
 
 def get_slope(data: np.ndarray, sampling_step: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Computes angle (in rad) and magnitude of the given 2D array of values
+    """
     test_slice = data[::sampling_step, ::sampling_step]
     r, c = np.shape(data)
     Y, X = np.mgrid[0:r:sampling_step, 0:c:sampling_step]
     dY, dX = np.gradient(test_slice)  # order! Y X
 
     angles = np.arctan2(dY, dX)
-    inclination = np.sqrt(dX**2 + dY**2)
+    magnitude = np.hypot(dY, dX)
 
     angles = cv2.resize(angles, data.shape)
-    inclination = cv2.resize(inclination, data.shape)
+    magnitude = cv2.resize(magnitude, data.shape)
 
-    return (X, Y, dX, dY, angles, inclination)
+    return (X, Y, dX, dY, angles, magnitude)
+
+
+
+# INPUT_FILE = Path("data/hatching_dem.tif")
+INPUT_FILE = Path("data/gebco_crop.tif")
+# INPUT_FILE = Path("data/slope_test_2.tif")
+# INPUT_FILE = Path("data/slope_test_4.tif")
+
+OUTPUT_PATH = Path("output")
+
+SAMPLING_STEP = 5
 
 
 if __name__ == "__main__":

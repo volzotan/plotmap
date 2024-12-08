@@ -7,12 +7,15 @@ from rasterio.features import rasterize
 from shapely import LineString, Polygon, MultiPolygon, MultiLineString
 from shapelysmooth import taubin_smooth
 
+from experiments.hatching.flowlines import FlowlineHatcher, FlowlineHatcherConfig
 from experiments.hatching.slope import get_slope
 from lineworld.core.hatching import HatchingOptions, HatchingDirection, create_hatching
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
 from lineworld.util.geometrytools import unpack_multipolygon
+
+from loguru import logger
 
 MIN_RING_LENGTH = 50
 POST_SMOOTHING_SIMPLIFY_TOLERANCE = 0.5
@@ -26,13 +29,7 @@ OUTPUT_PATH = Path("experiments/hatching/output")
 
 LEVELS = 20
 DISTANCES = [3.0 + x * 0.9 for x in range(LEVELS)]
-BOUNDS = get_elevation_bounds([0, 20], LEVELS)
-
-# BOUNDS = get_elevation_bounds([-20, 0], LEVELS)
-
-DISTANCES = list(reversed(DISTANCES))
-# BOUNDS = get_elevation_bounds([0, -6000], LEVELS)
-BOUNDS = get_elevation_bounds([-10000, 0], LEVELS)
+# BOUNDS = get_elevation_bounds([0, 20], LEVELS)
 
 
 def read_data(input_path: Path) -> np.ndarray:
@@ -48,9 +45,10 @@ def read_data(input_path: Path) -> np.ndarray:
 
 def standard_hatching(data: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
     output = []
+    bounds = get_elevation_bounds([np.min(data), np.max(data)], LEVELS)
 
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
+        extracted_geometries = _extract_polygons(data, *bounds[i], False)
 
         polygons = []
         for g in extracted_geometries:
@@ -87,9 +85,10 @@ def standard_hatching_concentric(data: np.ndarray, **kwargs) -> list[MultiLineSt
         return lines
 
     output = []
+    bounds = get_elevation_bounds([np.min(data), np.max(data)], LEVELS)
 
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
+        extracted_geometries = _extract_polygons(data, *bounds[i], False)
 
         polygons = []
         for g in extracted_geometries:
@@ -107,9 +106,10 @@ def standard_hatching_concentric(data: np.ndarray, **kwargs) -> list[MultiLineSt
 
 def standard_hatching_slope_orientation(data: np.ndarray, angles: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
     output = []
+    bounds = get_elevation_bounds([np.min(data), np.max(data)], LEVELS)
 
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(data, *BOUNDS[i], False)
+        extracted_geometries = _extract_polygons(data, *bounds[i], False)
 
         polygons = []
         for g in extracted_geometries:
@@ -163,8 +163,10 @@ def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineStrin
     output_bright = []
     output_dark = []
 
+    bounds = get_elevation_bounds([np.min(data), np.max(data)], LEVELS)
+
     for i in range(LEVELS):
-        extracted_geometries = _extract_polygons(data, *BOUNDS[i], True)
+        extracted_geometries = _extract_polygons(data, *bounds[i], True)
 
         polygons = []
         for g in extracted_geometries:
@@ -211,6 +213,27 @@ def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineStrin
     return [output_bright, output_dark]
 
 
+def flowline_hatching(data: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
+
+    c = FlowlineHatcherConfig()
+
+    density_data = data
+
+    density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
+    density = np.full(density_data.shape, c.LINE_DISTANCE[0], dtype=float) + (
+            density_normalized * (c.LINE_DISTANCE[1] - c.LINE_DISTANCE[0]))
+
+    X, Y, dX, dY, angles, inclination = get_slope(data, 10)
+
+    hatcher = FlowlineHatcher(
+        shapely.box(0, 0, data.shape[1], data.shape[0]),
+        data, angles, inclination, density, c
+    )
+
+    linestrings = hatcher.hatch()
+
+    return linestrings
+
 if __name__ == "__main__":
 
     # print(_cut_linestring(LineString([
@@ -223,20 +246,24 @@ if __name__ == "__main__":
 
     data = read_data(INPUT_FILE)
 
-    print(f"data {INPUT_FILE} min: {np.min(data)} / max: {np.max(data)}")
+    logger.info(f"data {INPUT_FILE} min: {np.min(data)} / max: {np.max(data)}")
 
     X, Y, dX, dY, angles, inclination = get_slope(data, 10)
 
     experiments_table = {
-        # "hatching_a": standard_hatching,
-        # "hatching_a_concentric": standard_hatching_concentric,
-        # "hatching_c": standard_hatching_slope_orientation,
+        "hatching_a": standard_hatching,
+        "hatching_a_concentric": standard_hatching_concentric,
+        "hatching_c": standard_hatching_slope_orientation,
         "hatching_tanaka": illuminated_contours,
+        "hatching_flowlines": flowline_hatching,
     }
 
     land_polys = _extract_polygons(data, *get_elevation_bounds([0, 10_000], 1)[0], True)
 
     for k, v in experiments_table.items():
+
+        logger.info(f"running: {k}")
+
         hatchings = v(data, angles=angles)
 
         doc = DocumentInfo()

@@ -19,16 +19,20 @@ from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevatio
 
 @dataclass
 class FlowlineHatcherConfig():
+
     LINE_DISTANCE: tuple[float, float] = (2, 40)  # distance between lines
     LINE_STEP_DISTANCE: float = 1.0  # distance between points constituting a line
+
     MAX_ANGLE_DISCONTINUITY: float = math.pi / 2  # max difference (in radians) in slope between line points
     MIN_INCLINATION: float = 0.1  # 50.0
 
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 20  # How many line segments should be skipped before the next seedpoint is extracted
-    LINE_MAX_SEGMENTS: int = 200
+    LINE_MAX_SEGMENTS: int = 300
 
     BLUR_ANGLES: bool = True
     BLUR_DENSITY_MAP: bool = True
+
+    COLLISION_APPROXIMATE: bool = True
 
 
 class FlowlineHatcher():
@@ -73,8 +77,8 @@ class FlowlineHatcher():
 
         return np.any(
             self.point_raster[
-            max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
-            max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
+                max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
+                max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
             ]
         )
 
@@ -96,8 +100,10 @@ class FlowlineHatcher():
         return False
 
     def _collision(self, x: float, y: float) -> bool:
-        # return self._collision_precise(x, y)
-        return self._collision_approximate(x, y)
+        if self.config.COLLISION_APPROXIMATE:
+            return self._collision_approximate(x, y)
+        else:
+            return self._collision_precise(x, y)
 
     def _next_point(self, x1: float, y1: float, forwards: bool) -> float:
 
@@ -279,8 +285,11 @@ class FlowlineHatcher():
             for lp in line_points:
                 x = int(lp[0])
                 y = int(lp[1])
-                # self.point_map[f"{x},{y}"].append(lp)
-                self.point_raster[y, x] = True
+                if self.config.COLLISION_APPROXIMATE:
+                    self.point_raster[y, x] = True
+                else:
+                    self.point_map[f"{x},{y}"].append(lp)
+
 
             # viz
             # cv2.circle(output, (round(seed[0]), round(seed[1])), 2, (255, 0, 0), -1)
@@ -295,9 +304,10 @@ class FlowlineHatcher():
 # INPUT_FILE = Path("experiments/hatching/data/gebco_crop.tif")
 
 ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/reproject.tif")
-DENSITY_FILE = Path("shaded_relief4.png")
+# DENSITY_FILE = Path("shaded_relief4.png")
 DENSITY_FILE = ELEVATION_FILE
 TARGET_RESOLUTION = [20000, 20000]
+CROP_SIZE = [2000, 2000]
 
 # ELEVATION_FILE = Path("experiments/hatching/data/slope_test_5.tif")
 # DENSITY_FILE = ELEVATION_FILE
@@ -315,7 +325,7 @@ if __name__ == "__main__":
     # self.polygon = shapely.box(0, 0, 999, 999)
     # self.polygon = Point([500, 500]).buffer(450)
 
-    c = FlowlineHatcherConfig
+    c = FlowlineHatcherConfig()
 
     data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
     if not data.shape == TARGET_RESOLUTION:
@@ -332,7 +342,6 @@ if __name__ == "__main__":
         density_data = cv2.resize(density_data, data.shape)
 
     # CROP
-    CROP_SIZE = [3000, 3000]
     data = data[
            TARGET_RESOLUTION[1] // 2 - CROP_SIZE[1] // 2:TARGET_RESOLUTION[1] // 2 + CROP_SIZE[1] // 2,
            TARGET_RESOLUTION[0] // 2 - CROP_SIZE[0] // 2:TARGET_RESOLUTION[0] // 2 + CROP_SIZE[0] // 2]
