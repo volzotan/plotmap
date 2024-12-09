@@ -1,4 +1,3 @@
-import cProfile as profile
 import datetime
 import math
 from collections import deque
@@ -19,20 +18,89 @@ from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevatio
 
 @dataclass
 class FlowlineHatcherConfig():
-
-    LINE_DISTANCE: tuple[float, float] = (2, 40)  # distance between lines
+    LINE_DISTANCE: tuple[float, float] = (2, 80)  # distance between lines
     LINE_STEP_DISTANCE: float = 1.0  # distance between points constituting a line
 
-    MAX_ANGLE_DISCONTINUITY: float = math.pi / 2  # max difference (in radians) in slope between line points
+    MAX_ANGLE_DISCONTINUITY: float = math.pi / 4  # max difference (in radians) in slope between line points
     MIN_INCLINATION: float = 0.1  # 50.0
 
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 20  # How many line segments should be skipped before the next seedpoint is extracted
     LINE_MAX_SEGMENTS: int = 300
 
     BLUR_ANGLES: bool = True
-    BLUR_DENSITY_MAP: bool = True
+    BLUR_ANGLES_KERNEL_SIZE: int = 11
+    BLUR_DENSITY_MAP: bool = False
 
     COLLISION_APPROXIMATE: bool = True
+
+    VIZ_LINE_THICKNESS: int = 5
+
+
+class FlowlineTiler():
+
+    def __init__(self,
+                 elevation: np.ndarray,
+                 angles: np.ndarray,
+                 inclination: np.ndarray,
+                 density: np.ndarray,
+                 config: FlowlineHatcherConfig,
+                 num_tiles: tuple[int, int]):
+
+        self.elevation = elevation
+        self.angles = angles
+        self.inclination = inclination
+        self.density = density
+        self.config = config
+        self.num_tiles = num_tiles
+
+        self.tiles: list[list[dict[str, int | np.ndarray]]] = \
+            [[{} for _ in range(num_tiles[0])] for _ in range(num_tiles[1])]
+
+        self.row_size = self.elevation.shape[0] / self.num_tiles[1]
+        self.col_size = self.elevation.shape[1] / self.num_tiles[0]
+
+        for col in range(self.num_tiles[0]):
+            for row in range(self.num_tiles[1]):
+                self.tiles[row][col]["min_row"] = int(self.row_size * row)
+                self.tiles[row][col]["min_col"] = int(self.col_size * col)
+                self.tiles[row][col]["max_row"] = int(self.row_size * (row + 1)) - 1
+                self.tiles[row][col]["max_col"] = int(self.col_size * (col + 1)) - 1
+
+    def hatch(self) -> list[LineString]:
+
+        first_stage_points = []
+
+        for col in range(self.num_tiles[0]):
+            for row in range(self.num_tiles[1]):
+
+                logger.debug(f"processing tile {col} {row}")
+
+                t = self.tiles[row][col]
+
+                hatcher = FlowlineHatcher(
+                    shapely.box(0, 0, self.col_size, self.row_size),
+                    self.elevation[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
+                    self.angles[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
+                    self.inclination[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
+                    self.density[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
+                    self.config,
+                    first_stage_points=first_stage_points
+                )
+
+                # TODO: extract first_stage_points from the point_raster of already processed neighbouring tiles
+
+                linestrings = hatcher.hatch()
+                linestrings = [shapely.affinity.translate(ls, xoff=t["min_col"], yoff=t["min_row"]) for ls in
+                               linestrings]
+
+                self.tiles[row][col]["linestrings"] = linestrings
+
+        linestrings = []
+        for col in range(self.num_tiles[0]):
+            for row in range(self.num_tiles[1]):
+                linestrings += self.tiles[row][col]["linestrings"]
+
+        return linestrings
 
 
 class FlowlineHatcher():
@@ -42,7 +110,8 @@ class FlowlineHatcher():
                  angles: np.ndarray,
                  inclination: np.ndarray,
                  density: np.ndarray,
-                 config: FlowlineHatcherConfig):
+                 config: FlowlineHatcherConfig,
+                 first_stage_points=[]):
 
         self.polygon = polygon
         self.config = config
@@ -57,18 +126,24 @@ class FlowlineHatcher():
                      math.ceil(self.bbox[3] - self.bbox[1])]  # minx, miny, maxx, maxy
 
         if self.config.BLUR_ANGLES:
-            self.angles = cv2.blur(self.angles, (100, 100))
+            self.angles = cv2.blur(
+                self.angles,
+                (self.config.BLUR_ANGLES_KERNEL_SIZE, self.config.BLUR_ANGLES_KERNEL_SIZE)
+            )
             # self.angles = cv2.GaussianBlur(self.angles, (11, 11), 0)
 
         if self.config.BLUR_DENSITY_MAP:
             self.density = cv2.blur(self.density, (60, 60))
 
-        self.point_map = {}
-        for x in range(self.bbox[2] + 1):
-            for y in range(self.bbox[3] + 1):
-                self.point_map[f"{x},{y}"] = []
+        if self.config.COLLISION_APPROXIMATE:
+            self.point_raster = np.zeros([self.bbox[3] + 1, self.bbox[2] + 1], dtype=bool)
+        else:
+            self.point_map = {}
+            for x in range(self.bbox[2] + 1):
+                for y in range(self.bbox[3] + 1):
+                    self.point_map[f"{x},{y}"] = []
 
-        self.point_raster = np.zeros([self.bbox[3] + 1, self.bbox[2] + 1], dtype=bool)
+        self.first_stage_points = first_stage_points
 
     def _collision_approximate(self, x: float, y: float) -> bool:
         x = int(x)
@@ -77,8 +152,8 @@ class FlowlineHatcher():
 
         return np.any(
             self.point_raster[
-                max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
-                max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
+            max(y - half_d, 0):min(y + half_d, self.point_raster.shape[0]),
+            max(x - half_d, 0):min(x + half_d, self.point_raster.shape[1])
             ]
         )
 
@@ -136,6 +211,7 @@ class FlowlineHatcher():
             a2 = self.angles[int(y2), int(x2)]
 
             if abs(a2 - a1) > self.config.MAX_ANGLE_DISCONTINUITY:
+                # print("MAX_ANGLE_DISCONTINUITY")
                 return None
 
         return (x2, y2)
@@ -181,21 +257,22 @@ class FlowlineHatcher():
 
     def _debug_viz(self, linestrings: list[LineString]) -> None:
 
-        output = np.zeros([self.elevation.shape[0], self.elevation.shape[1], 3], dtype=np.uint8)
+        output = np.full([self.elevation.shape[0], self.elevation.shape[1], 3], 255, dtype=np.uint8)
         for ls in linestrings:
             line_points = ls.coords
             for i in range(len(line_points) - 1):
                 start = (round(line_points[i][0]), round(line_points[i][1]))
                 end = (round(line_points[i + 1][0]), round(line_points[i + 1][1]))
-                cv2.line(output, start, end, (255, 255, 255), 2)
-        cv2.imwrite(Path(OUTPUT_PATH, "flowlines.png"), ~output)
+                cv2.line(output, start, end, (0, 0, 0), self.config.VIZ_LINE_THICKNESS)
+        output[self.point_raster, :] = [0, 0, 255]
+        cv2.imwrite(Path(OUTPUT_PATH, "flowlines.png"), output)
 
         fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3)
 
         ax1.imshow(self.elevation, cmap="binary")
         ax1.set_title("elevation")
 
-        ax2.imshow(self.angles)
+        ax2.imshow(self.angles, cmap="hsv")
         ax2.set_title("angles")
 
         ax3.imshow(self.inclination)
@@ -207,7 +284,7 @@ class FlowlineHatcher():
         ax5.imshow(self.point_raster)
         ax5.set_title("collision map")
 
-        ax6.imshow(~output)
+        ax6.imshow(output)
         ax6.set_title("output")
 
         fig.set_figheight(12)
@@ -231,15 +308,26 @@ class FlowlineHatcher():
         # output = np.zeros([1000, 1000, 3], dtype=np.uint8)
 
         linestrings = []
+
         starting_points = deque()
 
         for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, num=100):
             for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, num=100):
                 starting_points.append([i, j])
 
+        starting_points_priority = deque(self.first_stage_points)
+
         while len(starting_points) > 0:
 
-            seed = starting_points.popleft()
+            seed = None
+            if len(starting_points_priority) > 0:
+                seed = starting_points_priority.popleft()
+            else:
+                # pass
+                seed = starting_points.popleft()
+
+            if seed is None:
+                break
 
             if self._collision(*seed):
                 continue
@@ -290,7 +378,6 @@ class FlowlineHatcher():
                 else:
                     self.point_map[f"{x},{y}"].append(lp)
 
-
             # viz
             # cv2.circle(output, (round(seed[0]), round(seed[1])), 2, (255, 0, 0), -1)
             # for i in range(len(line_points) - 1):
@@ -301,13 +388,32 @@ class FlowlineHatcher():
         return linestrings
 
 
-# INPUT_FILE = Path("experiments/hatching/data/gebco_crop.tif")
+def _extract_first_stage_points(img: np.ndarray) -> list[tuple[float, float]]:
+    params = cv2.SimpleBlobDetector_Params()
 
-ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/reproject.tif")
+    params.filterByArea = True
+    params.minArea = 1
+
+    params.filterByInertia = False
+    params.filterByConvexity = False
+
+    params.minThreshold = 0
+    params.maxThreshold = 200
+
+    detector = cv2.SimpleBlobDetector_create(params)
+    keypoints = detector.detect(img)
+
+    # im_with_keypoints = cv2.drawKeypoints(img, keypoints, np.array([]), (0, 0, 255),
+    #                                       cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    # cv2.imwrite("blobs.png", im_with_keypoints)
+
+    return [k.pt for k in keypoints]  # x,y order
+
+
+ELEVATION_FILE = Path("experiments/hatching/data/flowlines_gebco_crop.tif")
+FIRST_STAGE_FILE = Path("experiments/hatching/data/flowlines_gebco_crop_ridges.png")
 # DENSITY_FILE = Path("shaded_relief4.png")
 DENSITY_FILE = ELEVATION_FILE
-TARGET_RESOLUTION = [20000, 20000]
-CROP_SIZE = [2000, 2000]
 
 # ELEVATION_FILE = Path("experiments/hatching/data/slope_test_5.tif")
 # DENSITY_FILE = ELEVATION_FILE
@@ -317,58 +423,68 @@ OUTPUT_PATH = Path("experiments/hatching/output")
 
 if __name__ == "__main__":
 
-    # sanity checks:
-
-    # if not (LINE_STEP_DISTANCE < LINE_DISTANCE[0]):
-    #     raise Exception("distance between points of a line must be smaller than the distance between lines")
-
-    # self.polygon = shapely.box(0, 0, 999, 999)
-    # self.polygon = Point([500, 500]).buffer(450)
-
-    c = FlowlineHatcherConfig()
+    config = FlowlineHatcherConfig()
 
     data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
-    if not data.shape == TARGET_RESOLUTION:
-        data = cv2.resize(data, TARGET_RESOLUTION)
+    first_stage_data = cv2.imread(str(FIRST_STAGE_FILE), cv2.IMREAD_GRAYSCALE)
 
     logger.debug(f"data {ELEVATION_FILE} min: {np.min(data)} | max: {np.max(data)}")
 
     density_data = None
+
     if DENSITY_FILE.suffix.endswith(".tif"):
         density_data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
     else:
         density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+
+    # data = cv2.resize(data, [3000, 3000])
+    first_stage_data = cv2.resize(first_stage_data, data.shape)
+
     if not density_data.shape == data.shape:
         density_data = cv2.resize(density_data, data.shape)
 
-    # CROP
-    data = data[
-           TARGET_RESOLUTION[1] // 2 - CROP_SIZE[1] // 2:TARGET_RESOLUTION[1] // 2 + CROP_SIZE[1] // 2,
-           TARGET_RESOLUTION[0] // 2 - CROP_SIZE[0] // 2:TARGET_RESOLUTION[0] // 2 + CROP_SIZE[0] // 2]
-    density_data = density_data[
-                   TARGET_RESOLUTION[1] // 2 - CROP_SIZE[1] // 2:TARGET_RESOLUTION[1] // 2 + CROP_SIZE[1] // 2,
-                   TARGET_RESOLUTION[0] // 2 - CROP_SIZE[0] // 2:TARGET_RESOLUTION[0] // 2 + CROP_SIZE[0] // 2]
-
     density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
-    density = np.full(density_data.shape, c.LINE_DISTANCE[0], dtype=float) + (
-            density_normalized * (c.LINE_DISTANCE[1] - c.LINE_DISTANCE[0]))
+    density = (np.full(density_data.shape, config.LINE_DISTANCE[0], dtype=float) +
+               (density_normalized * (config.LINE_DISTANCE[1] - config.LINE_DISTANCE[0])))
 
-    X, Y, dX, dY, angles, inclination = get_slope(data, 10)
+    X, Y, dX, dY, angles, inclination = get_slope(data, 1)
+
+    first_stage_points = []
+    # first_stage_points = _extract_first_stage_points(first_stage_data)
 
     timer = datetime.datetime.now()
 
-    hatcher = FlowlineHatcher(
-        shapely.box(0, 0, data.shape[1], data.shape[0]),
-        data, angles, inclination, density, c
+    # pr = profile.Profile()
+    # pr.enable()
+
+    # hatcher = FlowlineHatcher(
+    #     shapely.box(0, 0, data.shape[1], data.shape[0]),
+    #     data,
+    #     angles,
+    #     inclination,
+    #     density,
+    #     config,
+    #     first_stage_points=first_stage_points
+    # )
+    #
+    # # for p in first_stage_points:
+    # #     hatcher.point_raster[int(p[1]), int(p[0])] = True
+    #
+    # linestrings = hatcher.hatch()
+
+    # pr.disable()
+    # pr.dump_stats("profile.pstat")
+
+    tiler = FlowlineTiler(
+        data,
+        angles,
+        inclination,
+        density,
+        config,
+        [5, 1]
     )
 
-    pr = profile.Profile()
-    pr.enable()
-
-    linestrings = hatcher.hatch()
-
-    pr.disable()
-    pr.dump_stats("profile.pstat")
+    linestrings = tiler.hatch()
 
     total_time = (datetime.datetime.now() - timer).total_seconds()
     avg_line_length = sum([x.length for x in linestrings]) / len(linestrings)
@@ -376,7 +492,7 @@ if __name__ == "__main__":
     logger.info(f"total time:         {total_time:5.2f}s")
     logger.info(f"avg line length:    {avg_line_length:5.2f}")
 
-    hatcher._debug_viz(linestrings)
+    # hatcher._debug_viz(linestrings)
 
     svg = SvgWriter(Path(OUTPUT_PATH, "flowlines.svg"), data.shape)
 
@@ -387,12 +503,12 @@ if __name__ == "__main__":
     }
     svg.add("flowlines", linestrings, options=options)
 
-    land_polys = _extract_polygons(data, *get_elevation_bounds([0, 10_000], 1)[0], True)
-    options_land = {
-        "fill": "green",
-        "stroke": "none",
-        "fill-opacity": "0.5"
-    }
-    svg.add("land", land_polys, options=options_land)
+    # land_polys = _extract_polygons(data, *get_elevation_bounds([0, 10_000], 1)[0], True)
+    # options_land = {
+    #     "fill": "green",
+    #     "stroke": "none",
+    #     "fill-opacity": "0.5"
+    # }
+    # svg.add("land", land_polys, options=options_land)
 
     svg.write()
