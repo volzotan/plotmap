@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import rasterio
 import shapely
 from loguru import logger
 from matplotlib import pyplot as plt
@@ -35,20 +36,18 @@ class FlowlineHatcherConfig():
 
     VIZ_LINE_THICKNESS: int = 5
 
+    SIMPLIFY_TOLERANCE: float = 1.0
+
 
 class FlowlineTiler():
 
     def __init__(self,
                  elevation: np.ndarray,
-                 angles: np.ndarray,
-                 inclination: np.ndarray,
                  density: np.ndarray,
                  config: FlowlineHatcherConfig,
                  num_tiles: tuple[int, int]):
 
         self.elevation = elevation
-        self.angles = angles
-        self.inclination = inclination
         self.density = density
         self.config = config
         self.num_tiles = num_tiles
@@ -56,19 +55,17 @@ class FlowlineTiler():
         self.tiles: list[list[dict[str, int | np.ndarray]]] = \
             [[{} for _ in range(num_tiles[0])] for _ in range(num_tiles[1])]
 
-        self.row_size = self.elevation.shape[0] / self.num_tiles[1]
-        self.col_size = self.elevation.shape[1] / self.num_tiles[0]
+        self.row_size = int(self.elevation.shape[0] / self.num_tiles[1])
+        self.col_size = int(self.elevation.shape[1] / self.num_tiles[0])
 
         for col in range(self.num_tiles[0]):
             for row in range(self.num_tiles[1]):
                 self.tiles[row][col]["min_row"] = int(self.row_size * row)
                 self.tiles[row][col]["min_col"] = int(self.col_size * col)
-                self.tiles[row][col]["max_row"] = int(self.row_size * (row + 1)) - 1
-                self.tiles[row][col]["max_col"] = int(self.col_size * (col + 1)) - 1
+                self.tiles[row][col]["max_row"] = int(self.row_size * (row + 1))
+                self.tiles[row][col]["max_col"] = int(self.col_size * (col + 1))
 
     def hatch(self) -> list[LineString]:
-
-        first_stage_points = []
 
         for col in range(self.num_tiles[0]):
             for row in range(self.num_tiles[1]):
@@ -77,23 +74,38 @@ class FlowlineTiler():
 
                 t = self.tiles[row][col]
 
+                # TODO: extract first_stage_points from the point_raster of already processed neighbouring tiles
+
+                first_stage_points = []
+
+                if col > 0:
+
+                    point_raster_left = self.tiles[col-1][row]["raster"]
+                    for y in point_raster_left[:, -2].nonzero()[0]:
+                        first_stage_points.append([0, y])
+
+                if row > 0:
+
+                    point_raster_top = self.tiles[col][row-1]["raster"]
+                    for x in point_raster_top[-2, :].nonzero()[0]:
+                        first_stage_points.append([x, 0])
+
+                print(f"first stage points: {len(first_stage_points)}")
+
                 hatcher = FlowlineHatcher(
                     shapely.box(0, 0, self.col_size, self.row_size),
                     self.elevation[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
-                    self.angles[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
-                    self.inclination[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
                     self.density[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
                     self.config,
                     first_stage_points=first_stage_points
                 )
-
-                # TODO: extract first_stage_points from the point_raster of already processed neighbouring tiles
 
                 linestrings = hatcher.hatch()
                 linestrings = [shapely.affinity.translate(ls, xoff=t["min_col"], yoff=t["min_row"]) for ls in
                                linestrings]
 
                 self.tiles[row][col]["linestrings"] = linestrings
+                self.tiles[row][col]["raster"] = hatcher.point_raster
 
         linestrings = []
         for col in range(self.num_tiles[0]):
@@ -107,8 +119,6 @@ class FlowlineHatcher():
 
     def __init__(self, polygon: Polygon,
                  elevation: np.ndarray,
-                 angles: np.ndarray,
-                 inclination: np.ndarray,
                  density: np.ndarray,
                  config: FlowlineHatcherConfig,
                  first_stage_points=[]):
@@ -116,13 +126,17 @@ class FlowlineHatcher():
         self.polygon = polygon
         self.config = config
 
-        self.elevation = np.pad(elevation, (1, 1), "edge")[1:, 1:]
-        self.angles = np.pad(angles, (1, 1), "edge")[1:, 1:]
-        self.inclination = np.pad(inclination, (1, 1), "edge")[1:, 1:]
-        self.density = np.pad(density, (1, 1), "edge")[1:, 1:]
+        _, _, _, _, angles, inclination = get_slope(elevation, 1)
+
+        self.elevation = elevation # np.pad(elevation, (1, 1), "edge")[1:, 1:]
+        self.angles = angles # np.pad(angles, (1, 1), "edge")[1:, 1:]
+        self.inclination = inclination # np.pad(inclination, (1, 1), "edge")[1:, 1:]
+        self.density = density # np.pad(density, (1, 1), "edge")[1:, 1:]
 
         self.bbox = self.polygon.bounds
-        self.bbox = [0, 0, math.ceil(self.bbox[2] - self.bbox[0]),
+        self.bbox = [0,
+                     0,
+                     math.ceil(self.bbox[2] - self.bbox[0]),
                      math.ceil(self.bbox[3] - self.bbox[1])]  # minx, miny, maxx, maxy
 
         if self.config.BLUR_ANGLES:
@@ -363,7 +377,7 @@ class FlowlineHatcher():
             if len(line_points) < 2:
                 continue
 
-            linestrings.append(LineString(line_points))
+            linestrings.append(LineString(line_points).simplify(self.config.SIMPLIFY_TOLERANCE))
 
             # seed points
             seed_points = self._seed_points(line_points)
@@ -410,8 +424,9 @@ def _extract_first_stage_points(img: np.ndarray) -> list[tuple[float, float]]:
     return [k.pt for k in keypoints]  # x,y order
 
 
+# ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/reproject.tif")
 ELEVATION_FILE = Path("experiments/hatching/data/flowlines_gebco_crop.tif")
-FIRST_STAGE_FILE = Path("experiments/hatching/data/flowlines_gebco_crop_ridges.png")
+# FIRST_STAGE_FILE = Path("experiments/hatching/data/flowlines_gebco_crop_ridges.png")
 # DENSITY_FILE = Path("shaded_relief4.png")
 DENSITY_FILE = ELEVATION_FILE
 
@@ -425,34 +440,42 @@ if __name__ == "__main__":
 
     config = FlowlineHatcherConfig()
 
-    data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
-    first_stage_data = cv2.imread(str(FIRST_STAGE_FILE), cv2.IMREAD_GRAYSCALE)
+    # data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)^
+    # first_stage_data = cv2.imread(str(FIRST_STAGE_FILE), cv2.IMREAD_GRAYSCALE)
+
+    data = None
+    with rasterio.open(str(ELEVATION_FILE)) as dataset:
+        data = dataset.read(out_shape=(10000, 10000), resampling=rasterio.enums.Resampling.bilinear)[0]
+        # data = dataset.read(1)
 
     logger.debug(f"data {ELEVATION_FILE} min: {np.min(data)} | max: {np.max(data)}")
 
     density_data = None
 
-    if DENSITY_FILE.suffix.endswith(".tif"):
-        density_data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
+    if DENSITY_FILE == ELEVATION_FILE:
+        density_data = np.copy(data)
     else:
-        density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+        if DENSITY_FILE.suffix.endswith(".tif"):
+            density_data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
+        else:
+            density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
 
-    # data = cv2.resize(data, [3000, 3000])
-    first_stage_data = cv2.resize(first_stage_data, data.shape)
+    # data = cv2.resize(data, [10000, 10000])
+    # first_stage_data = cv2.resize(first_stage_data, data.shape)
 
-    if not density_data.shape == data.shape:
+    if density_data.shape != data.shape:
         density_data = cv2.resize(density_data, data.shape)
 
     density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
     density = (np.full(density_data.shape, config.LINE_DISTANCE[0], dtype=float) +
                (density_normalized * (config.LINE_DISTANCE[1] - config.LINE_DISTANCE[0])))
 
-    X, Y, dX, dY, angles, inclination = get_slope(data, 1)
-
     first_stage_points = []
     # first_stage_points = _extract_first_stage_points(first_stage_data)
 
     timer = datetime.datetime.now()
+
+
 
     # pr = profile.Profile()
     # pr.enable()
@@ -477,11 +500,9 @@ if __name__ == "__main__":
 
     tiler = FlowlineTiler(
         data,
-        angles,
-        inclination,
         density,
         config,
-        [5, 1]
+        [2, 1]
     )
 
     linestrings = tiler.hatch()
