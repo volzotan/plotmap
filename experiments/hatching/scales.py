@@ -94,7 +94,7 @@ if __name__ == "__main__":
         [quadratic_bezier, {"p1": [0.25, 0], "p2": [.75, 1.0]}],
         [quadratic_bezier, {"p1": [0.50, 0], "p2": [.50, 1.0]}],
         [quadratic_bezier, {"p1": [0.75, 0], "p2": [.25, 1.0]}],
-        [sigmoid, {}],
+        [quadratic_bezier, {"p1": [0.50, 0], "p2": [.75, 1.0]}],
     ]
 
     fig, axes = plt.subplots(nrows=2, ncols=len(scales))
@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
         xs = np.linspace(0, 1, endpoint=True, num=NUM_X_VALUES)
 
-        scale_obj = Scale(func, args, num_output_bins=10)
+        scale_obj = Scale(func, args, num_output_bins=20)
         ys = scale_obj.apply(xs) / scale_obj.num_output_bins
 
         ax = axes[0, i]
