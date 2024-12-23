@@ -27,11 +27,11 @@ class DocumentInfo():
     wrapover: bool = True
 
     # units in mm
-    width: float = 2000//2
-    height: float = 1200//2
+    width: float = 2000
+    height: float = 1200
 
     offset_x: float = 0.0
-    offset_y: float = 170//2
+    offset_y: float = 170
 
     tolerance: float = 0.1
 
@@ -44,6 +44,15 @@ class DocumentInfo():
         e = 1 / self.EQUATOR * self.width * -1  # vertical flip
         xoff = self.width / 2. + self.offset_x
         yoff = self.height / 2. + self.offset_y
+        return [a, b, d, e, xoff, yoff]
+
+    def get_transformation_matrix_raster(self, raster_width, raster_height) -> list[float]:
+        a = (1 / raster_width) * self.width
+        b = 0
+        d = 0
+        e = (1 / raster_height) * self.width
+        xoff = self.offset_x
+        yoff = -(self.width-self.height)/2 + self.offset_y
         return [a, b, d, e, xoff, yoff]
 
     def get_transformation_matrix_font(self, xoff: float, yoff: float) -> list[float]:
