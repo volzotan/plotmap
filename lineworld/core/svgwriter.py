@@ -18,6 +18,7 @@ class SvgWriter():
         self.image: str | None = None
         self.background_color: str | None = None
         self.offset: list[int | float] = [0, 0]
+        self.debug: bool = False
 
         self.layers = {}
         self.styles = {}
@@ -106,6 +107,9 @@ class SvgWriter():
 
             if self.image is not None:
                 out.write(f"<image x=\"0\" y=\"0\" xlink:href=\"{self.image}\" />")
+
+            if self.background_color is not None and self.debug:
+                out.write(f"<rect width=\"100%\" height=\"100%\" fill=\"{self.background_color}\"/>")
 
             out.write("\n")
 

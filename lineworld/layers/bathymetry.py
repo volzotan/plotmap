@@ -84,6 +84,18 @@ class Bathymetry(ElevationLayer):
 
         drawing_geometries = []
         with self.db.begin() as conn:
+            result = conn.execute(select(self.map_polygon_table))
+            geoms = [to_shape(row.polygon) for row in result]
+            for g in geoms:
+                drawing_geometries.append(g.exterior)
+                drawing_geometries += g.interiors
+
+        return (drawing_geometries, exclusion_zones)
+
+
+
+        drawing_geometries = []
+        with self.db.begin() as conn:
             if select_elevation_level is None:
                 result = conn.execute(select(self.map_lines_table))
                 drawing_geometries = [to_shape(row.lines) for row in result]

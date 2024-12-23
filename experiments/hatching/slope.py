@@ -39,8 +39,9 @@ def get_slope(data: np.ndarray, sampling_step: int) -> tuple[np.ndarray, np.ndar
     angles = np.arctan2(dY, dX)
     magnitude = np.hypot(dY, dX)
 
-    angles = cv2.resize(angles, data.shape)
-    magnitude = cv2.resize(magnitude, data.shape)
+    if sampling_step > 1:
+        angles = cv2.resize(angles, data.shape)
+        magnitude = cv2.resize(magnitude, data.shape)
 
     return (X, Y, dX, dY, angles, magnitude)
 

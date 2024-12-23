@@ -8,13 +8,14 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 
 DATA_URL = "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/geotiff/"
 
-DATA_DIR = Path("data", "GebcoToBlender".lower())
+DATA_DIR = Path("experiments/hatching/data", "GebcoToBlender".lower())
 TILES_DIR = Path(DATA_DIR, "tiles")
 SCALED_DIR = Path(DATA_DIR, "scaled")
 MOSAIC_FILE = Path(DATA_DIR, "gebco_mosaic.tif")
 REPROJECT_FILE = Path(DATA_DIR, "reproject.tif")
 
-GEOTIFF_SCALING_FACTOR = 1 / 8
+GEOTIFF_SCALING_FACTOR = 1
+# GEOTIFF_SCALING_FACTOR = 1/8 # correct ratio for blender
 
 
 def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: float) -> None:

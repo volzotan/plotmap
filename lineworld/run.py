@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from core import maptools
 from layers import bathymetry, contour
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines
 
 from shapely.geometry import MultiPolygon
 
@@ -23,7 +23,8 @@ if __name__ == "__main__":
 
     document_info = maptools.DocumentInfo()
 
-    layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, elevation_anchors=[0, -11_000], num_elevation_lines=15)
+    layer_bathymetry = bflowlines.Bflowlines("Bathymetry", engine)
+    # layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, elevation_anchors=[0, -11_000], num_elevation_lines=15)
     layer_contour = contour.Contour("Contour", engine, elevation_anchors=[0, 500, 2000, 9000], num_elevation_lines=24)
 
     layer_coastlines = coastlines.Coastlines("Coastlines", engine)
@@ -37,19 +38,19 @@ if __name__ == "__main__":
     layer_grid_labels = grid.GridLabels("Grid Labels", engine)
 
     active_layers = [
-        # layer_bathymetry,
+        layer_bathymetry,
         # layer_contour,
         # layer_coastlines,
-        layer_cities_labels,
-        layer_cities_circles,
-        layer_labels
+        # layer_cities_labels,
+        # layer_cities_circles,
+        # layer_labels,
         # layer_grid_bathymetry,
         # layer_grid_labels
     ]
 
     for layer in active_layers:
 
-        # l.extract()
+        # layer.extract()
 
         timer_start = datetime.datetime.now()
         polygons = layer.transform_to_world()
@@ -87,7 +88,7 @@ if __name__ == "__main__":
     draw_grid_labels, exclude = layer_grid_labels.out(exclude, document_info)
     draw_labels, exclude = layer_labels.out(exclude, document_info)
     draw_coastlines, exclude = layer_coastlines.out(exclude, document_info)
-    draw_contour, exclude = layer_contour.out(exclude, document_info)
+    # draw_contour, exclude = layer_contour.out(exclude, document_info)
     _, exclude = layer_grid_bathymetry.out(exclude, document_info)
     draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
 
@@ -166,12 +167,12 @@ if __name__ == "__main__":
     svg.add_style("coastlines", options_coastlines)
 
     svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
-    svg.add("contour", draw_contour, options=options_contour)
+    # svg.add("contour", draw_contour, options=options_contour)
     svg.add("coastlines", draw_coastlines)
-    svg.add("labels", draw_labels, options=options_labels)
-    svg.add("grid_labels", draw_grid_labels, options=options_grid)
-    svg.add("cities_labels", draw_cities_labels, options=options_cities_labels)
-    svg.add("cities_circles", draw_cities_circles, options=options_cities_circles)
+    # svg.add("labels", draw_labels, options=options_labels)
+    # svg.add("grid_labels", draw_grid_labels, options=options_grid)
+    # svg.add("cities_labels", draw_cities_labels, options=options_cities_labels)
+    # svg.add("cities_circles", draw_cities_circles, options=options_cities_circles)
 
     svg.write()
 
