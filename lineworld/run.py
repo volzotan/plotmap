@@ -1,29 +1,39 @@
+import argparse
+import cProfile as profile
 import datetime
 
+import fire
 from loguru import logger
+from shapely.geometry import MultiPolygon
 from sqlalchemy import create_engine
 
+import lineworld
 from core import maptools
-from layers import bathymetry, contour
+from layers import contour
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.layers import coastlines, grid, labels, cities, bflowlines
 
-from shapely.geometry import MultiPolygon
 
-import cProfile as profile
-
-from lineworld.util.scales import Colorscale
-
-if __name__ == "__main__":
+def run() -> None:
+    timer_start = datetime.datetime.now()
 
     pr = profile.Profile()
     pr.disable()
 
-    engine = create_engine("postgresql+psycopg://localhost:5432/lineworld") #, echo=True)
+    # parser = argparse.ArgumentParser(description="...")
+    # parser.add_argument("--set", metavar="KEY=VALUE", nargs='+')
+    # args = vars(parser.parse_args())
+    #
+    # print(args["set"])
+    # exit()
+
+    config = lineworld.get_config()
+
+    engine = create_engine(config["main"]["db_connection"]) # , echo=True)
 
     document_info = maptools.DocumentInfo()
 
-    layer_bathymetry = bflowlines.Bflowlines("Bathymetry", engine)
+    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config=config["layer"]["bathymetryflowlines"])
     # layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, elevation_anchors=[0, -11_000], num_elevation_lines=15)
     layer_contour = contour.Contour("Contour", engine, elevation_anchors=[0, 500, 2000, 9000], num_elevation_lines=24)
 
@@ -49,7 +59,6 @@ if __name__ == "__main__":
     ]
 
     for layer in active_layers:
-
         # layer.extract()
 
         timer_start = datetime.datetime.now()
@@ -83,13 +92,13 @@ if __name__ == "__main__":
 
     exclude = MultiPolygon()
 
-    draw_cities_labels, exclude = layer_cities_labels.out(exclude, document_info)
-    draw_cities_circles, exclude = layer_cities_circles.out(exclude, document_info)
-    draw_grid_labels, exclude = layer_grid_labels.out(exclude, document_info)
-    draw_labels, exclude = layer_labels.out(exclude, document_info)
+    # draw_cities_labels, exclude = layer_cities_labels.out(exclude, document_info)
+    # draw_cities_circles, exclude = layer_cities_circles.out(exclude, document_info)
+    # draw_grid_labels, exclude = layer_grid_labels.out(exclude, document_info)
+    # draw_labels, exclude = layer_labels.out(exclude, document_info)
     draw_coastlines, exclude = layer_coastlines.out(exclude, document_info)
     # draw_contour, exclude = layer_contour.out(exclude, document_info)
-    _, exclude = layer_grid_bathymetry.out(exclude, document_info)
+    # _, exclude = layer_grid_bathymetry.out(exclude, document_info)
     draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
 
     svg = SvgWriter("test.svg", [document_info.width, document_info.height])
@@ -176,3 +185,8 @@ if __name__ == "__main__":
 
     svg.write()
 
+    logger.info(f"total time: {(datetime.datetime.now() - timer_start).total_seconds():5.2f}s")
+
+
+if __name__ == "__main__":
+    run()

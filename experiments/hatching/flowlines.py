@@ -4,6 +4,7 @@ import math
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -20,41 +21,36 @@ from lineworld.core.svgwriter import SvgWriter
 
 @dataclass
 class FlowlineHatcherConfig():
-    LINE_DISTANCE: tuple[float, float] = (2, 80)  # distance between lines
-    LINE_STEP_DISTANCE: float = 1.0  # distance between points constituting a line
+    LINE_DISTANCE: tuple[float, float] = (0.8, 4.0)  # distance between lines
+    LINE_STEP_DISTANCE: float = 0.25  # distance between points constituting a line
+    PX_PER_MM: int = 1
 
     MAX_ANGLE_DISCONTINUITY: float = math.pi / 4  # max difference (in radians) in slope between line points
-    MIN_INCLINATION: float = 0.1  # 50.0
+    MIN_INCLINATION: float = 0.05  # 50.0
 
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 20  # How many line segments should be skipped before the next seedpoint is extracted
-    LINE_MAX_SEGMENTS: int = 300
+    LINE_MAX_SEGMENTS: int = 500
 
     BLUR_ANGLES: bool = True
     BLUR_ANGLES_KERNEL_SIZE: int = 3
     BLUR_DENSITY_MAP: bool = False
 
     COLLISION_APPROXIMATE: bool = True
-
     VIZ_LINE_THICKNESS: int = 5
-
-    SIMPLIFY_TOLERANCE: float = 1.0
 
 
 class FlowlineTiler():
 
     def __init__(self,
                  elevation: np.ndarray,
-                 density: np.ndarray,
                  config: FlowlineHatcherConfig,
                  num_tiles: tuple[int, int]):
 
         self.elevation = elevation
-        self.density = density
         self.config = config
         self.num_tiles = num_tiles
 
-        self.tiles: list[list[dict[str, int | np.ndarray]]] = \
-            [[{} for _ in range(num_tiles[0])] for _ in range(num_tiles[1])]
+        self.tiles: list[list[dict[str, int | np.ndarray]]] = [[{} for _ in range(num_tiles[0])] for _ in range(num_tiles[1])]
 
         self.row_size = int(self.elevation.shape[0] / self.num_tiles[1])
         self.col_size = int(self.elevation.shape[1] / self.num_tiles[0])
@@ -68,6 +64,10 @@ class FlowlineTiler():
 
 
     def hatch(self) -> list[LineString]:
+
+        # Prepare a non-linear scale for the density calculations
+        scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
+        density_data = (scale.apply, np.min(self.elevation), np.max(self.elevation))
 
         for col in range(self.num_tiles[0]):
             for row in range(self.num_tiles[1]):
@@ -93,7 +93,7 @@ class FlowlineTiler():
                 hatcher = FlowlineHatcher(
                     shapely.box(0, 0, self.col_size, self.row_size),
                     self.elevation[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
-                    self.density[t["min_row"]:t["max_row"], t["min_col"]:t["max_col"]],
+                    density_data,
                     self.config,
                     initial_seed_points=initial_seed_points
                 )
@@ -183,17 +183,17 @@ class FlowlineHatcher():
 
     def __init__(self, polygon: Polygon,
                  elevation: np.ndarray,
-                 density: np.ndarray,
+                 density_data: tuple[Callable, float, float],
                  config: FlowlineHatcherConfig,
                  initial_seed_points=[]):
 
         self.polygon = polygon
         self.config = config
+        self.density_data = density_data
 
         _, _, _, _, angles, inclination = get_slope(elevation, 1)
 
         self.elevation = elevation
-        self.density = density
         self.angles = angles
         self.inclination = inclination
 
@@ -237,7 +237,8 @@ class FlowlineHatcher():
         if x >= self.point_raster.shape[1]:
             return True
 
-        half_d = int(self.density[y, x] / 2)
+        # half_d = int(self.density[y, x] / 2)
+        half_d = int(self._density(x, y, *self.density_data) / 2)
 
         return np.any(
             self.point_raster[
@@ -246,10 +247,22 @@ class FlowlineHatcher():
             ]
         )
 
+    def _density(self, x: int, y: int, scale_func: Callable | None, norm_min: float, norm_max: float) -> float:
+
+        density_normalized = (self.elevation[y, x] - norm_min) / (norm_max - norm_min)
+
+        if scale_func is not None:
+            density_normalized = scale_func(density_normalized)
+
+        diff = self.config.LINE_DISTANCE[1]*self.config.PX_PER_MM - self.config.LINE_DISTANCE[0]*self.config.PX_PER_MM
+        return self.config.LINE_DISTANCE[0]*self.config.PX_PER_MM + density_normalized * diff
+
+
     def _collision_precise(self, x: float, y: float) -> bool:
         rx = round(x)
         ry = round(y)
-        d = self.density[ry, rx]
+        # d = self.density[ry, rx]
+        d = self._density(rx, ry, *self.density_data)
         half_d = math.ceil(d / 2)
 
         x_minmax = [max(rx - half_d, 0), min(rx + half_d, self.point_raster.shape[1])]
@@ -284,8 +297,8 @@ class FlowlineHatcher():
         if not forwards:
             dir = -1
 
-        x2 = x1 + self.config.LINE_STEP_DISTANCE * math.cos(a1) * dir
-        y2 = y1 + self.config.LINE_STEP_DISTANCE * math.sin(a1) * dir
+        x2 = x1 + self.config.LINE_STEP_DISTANCE * self.config.PX_PER_MM * math.cos(a1) * dir
+        y2 = y1 + self.config.LINE_STEP_DISTANCE * self.config.PX_PER_MM * math.sin(a1) * dir
 
         # if not self.polygon.contains(Point(x2, y2)):
         #     return None
@@ -328,7 +341,8 @@ class FlowlineHatcher():
             else:
                 a2 -= math.radians(90)
 
-            x4 = self.density[int(y3), int(x3)]
+            # x4 = self.density[int(y3), int(x3)]
+            x4 = self._density(int(x3), int(y3), *self.density_data)
             y4 = 0
 
             x5 = x4 * math.cos(a2) - y4 * math.sin(a2) + x3
@@ -401,7 +415,7 @@ class FlowlineHatcher():
             if len(line_points) < 2:
                 continue
 
-            linestrings.append(LineString(line_points).simplify(self.config.SIMPLIFY_TOLERANCE))
+            linestrings.append(LineString(line_points))
 
             # seed points
             seed_points = self._seed_points(line_points)
@@ -475,7 +489,7 @@ if __name__ == "__main__":
     density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
 
     # Apply a non-linear scale
-    scale = scale.Scale(scale.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
+    scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
     density_normalized = scale.apply(density_normalized)
 
     density = (np.full(density_data.shape, config.LINE_DISTANCE[0], dtype=float) +
@@ -488,21 +502,6 @@ if __name__ == "__main__":
 
     # pr = profile.Profile()
     # pr.enable()
-
-    # hatcher = FlowlineHatcher(
-    #     shapely.box(0, 0, data.shape[1], data.shape[0]),
-    #     data,
-    #     angles,
-    #     inclination,
-    #     density,
-    #     config,
-    #     first_stage_points=first_stage_points
-    # )
-    #
-    # # for p in first_stage_points:
-    # #     hatcher.point_raster[int(p[1]), int(p[0])] = True
-    #
-    # linestrings = hatcher.hatch()
 
     # pr.disable()
     # pr.dump_stats("profile.pstat")
