@@ -48,8 +48,6 @@ class BathymetryFlowlines(Layer):
     SOURCE_FILE = Path("data", "elevation", "gebco_mosaic.tif") # TODO
     ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
 
-    SIMPLIFY_TOLERANCE = 0.1
-
     EXCLUDE_BUFFER_DISTANCE = 2
 
     def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}) -> None:
@@ -58,7 +56,7 @@ class BathymetryFlowlines(Layer):
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
 
-        self.config = config
+        self.config = config.get("layer", {}).get("bathymetryflowlines", {})
 
         self.px_per_mm = self.config.get("px_per_mm", 10.0)
 
@@ -159,7 +157,7 @@ class BathymetryFlowlines(Layer):
         # convert from raster pixel coordinates to map coordinates
         mat = document_info.get_transformation_matrix_raster(self.raster_width, self.raster_height)
         linestrings = [affine_transform(line, mat) for line in linestrings]
-        linestrings = [line.simplify(self.SIMPLIFY_TOLERANCE) for line in linestrings]
+        linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
         return [BathymetryFlowlinesMapLines(None, line) for line in linestrings]
 

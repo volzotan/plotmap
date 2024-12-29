@@ -3,6 +3,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import fiona
 import geoalchemy2
@@ -63,8 +64,10 @@ class Labels(Layer):
 
     FONT_SIZE = 12
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_label, db)
+
+        self.config = config.get("layer", {}).get("labels", {})
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)

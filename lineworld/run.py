@@ -28,29 +28,27 @@ def run() -> None:
     # exit()
 
     config = lineworld.get_config()
-
     engine = create_engine(config["main"]["db_connection"]) # , echo=True)
+    document_info = maptools.DocumentInfo(config)
 
-    document_info = maptools.DocumentInfo()
+    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config)
+    # layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, config)
+    layer_contour = contour.Contour("Contour", engine, config)
 
-    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config=config["layer"]["bathymetryflowlines"])
-    # layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, elevation_anchors=[0, -11_000], num_elevation_lines=15)
-    layer_contour = contour.Contour("Contour", engine, elevation_anchors=[0, 500, 2000, 9000], num_elevation_lines=24)
+    layer_coastlines = coastlines.Coastlines("Coastlines", engine, config)
 
-    layer_coastlines = coastlines.Coastlines("Coastlines", engine)
+    layer_cities_labels = cities.CitiesLabels("CitiesLabels", engine, config)
+    layer_cities_circles = cities.CitiesCircles("CitiesCircles", engine, config)
 
-    layer_cities_labels = cities.CitiesLabels("CitiesLabels", engine)
-    layer_cities_circles = cities.CitiesCircles("CitiesCircles", engine)
+    layer_labels = labels.Labels("Labels", engine, config)
 
-    layer_labels = labels.Labels("Labels", engine)
-
-    layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine)
-    layer_grid_labels = grid.GridLabels("Grid Labels", engine)
+    layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine, config)
+    layer_grid_labels = grid.GridLabels("Grid Labels", engine, config)
 
     active_layers = [
         layer_bathymetry,
         # layer_contour,
-        # layer_coastlines,
+        layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
         # layer_labels,

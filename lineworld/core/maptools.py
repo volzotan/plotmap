@@ -20,22 +20,18 @@ class Pen():
 
 
 class DocumentInfo():
-    projection: Projection = Projection.VAN_DER_GRINTEN_I
-    # projection: Projection = Projection.WEB_MERCATOR
-    # projection: Projection = Projection.ECKERT_IV
-
-    wrapover: bool = True
-
-    # units in mm
-    width: float = 2000
-    height: float = 1200
-
-    offset_x: float = 0.0
-    offset_y: float = 170
-
-    tolerance: float = 0.1
 
     EQUATOR = 40075016.68557849
+
+    def __init__(self, config: dict[str, Any]):
+        self.projection = Projection[config.get("projection", "VAN_DER_GRINTEN_I")]
+        self.wrapover = config.get("wrapover", True)
+
+        self.width = config.get("width", 1000)
+        self.height = config.get("height", 1000)
+
+        self.offset_x = config.get("offset_x", 0)
+        self.offset_y = config.get("offset_y", 0)
 
     def get_transformation_matrix(self) -> list[float]:
         a = 1 / self.EQUATOR * self.width

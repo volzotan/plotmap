@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 import geoalchemy2
 import numpy as np
@@ -135,9 +136,11 @@ class GridBathymetry(Grid):
 
     EXCLUDE_BUFFER_DISTANCE = 0.3
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_label, db)
 
+        self.config = config.get("layer", {}).get("grid", {})
+        
         metadata = MetaData()
 
         self.map_lines_table = Table(
@@ -184,8 +187,10 @@ class GridLabels(Grid):
     OFFSET_LEFT = 5
     OFFSET_RIGHT = OFFSET_LEFT
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_label, db)
+
+        self.config = config.get("layer", {}).get("grid", {})
 
         metadata = MetaData()
 

@@ -1,3 +1,5 @@
+from typing import Any
+
 import geoalchemy2
 import shapely
 from core.hatching import HatchingOptions, HatchingDirection, create_hatching
@@ -19,9 +21,10 @@ class Bathymetry(ElevationLayer):
     def __init__(self,
                  layer_name: str,
                  db: engine.Engine,
-                 elevation_anchors: list[int | float] = [0, -10000],
-                 num_elevation_lines: int = 10) -> None:
-        super().__init__(layer_name, db, elevation_anchors=elevation_anchors, num_elevation_lines=num_elevation_lines)
+                 config: dict[str, Any]) -> None:
+        super().__init__(layer_name, db, config)
+
+        self.config = {**self.config, **config.get("layer", {}).get("bathymetry", {})}
 
         metadata = MetaData()
 
@@ -91,8 +94,6 @@ class Bathymetry(ElevationLayer):
                 drawing_geometries += g.interiors
 
         return (drawing_geometries, exclusion_zones)
-
-
 
         drawing_geometries = []
         with self.db.begin() as conn:

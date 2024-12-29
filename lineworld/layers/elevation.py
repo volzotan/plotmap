@@ -101,12 +101,10 @@ class ElevationLayer(Layer):
     def __init__(self,
                  layer_name: str,
                  db: engine.Engine,
-                 elevation_anchors: list[int | float] = [0, 10000],
-                 num_elevation_lines: int = 10) -> None:
+                 config: dict[str, Any]) -> None:
         super().__init__(layer_name, db)
 
-        self.ELEVATION_ANCHORS = elevation_anchors
-        self.NUM_ELEVATION_LINES = num_elevation_lines
+        self.config = config.get("layer", {}).get("elevation", {})
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
@@ -151,10 +149,13 @@ class ElevationLayer(Layer):
         if not self.MOSAIC_FILE.exists():
             raise Exception(f"Gebco mosaic GeoTiff {self.MOSAIC_FILE} not found")
 
+        if "elevation_anchors" not in self.config:
+            logger.warning(f"configuration \"elevation_anchors\" missing for layer {self.LAYER_NAME}, fallback to default values")
+
         polygons: list[ElevationWorldPolygon] = []
         layer_elevation_bounds = gebco_grid_to_polygon.get_elevation_bounds(
-            self.ELEVATION_ANCHORS,
-            self.NUM_ELEVATION_LINES
+            self.config.get("elevation_anchors", [0, 10000]),
+            self.config.get("num_elevation_lines", 10)
         )
         logger.debug(
             f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}")
@@ -260,7 +261,7 @@ class ElevationLayer(Layer):
 
             polys = process_polygons(
                 polys,
-                simplify_precision=document_info.tolerance,
+                simplify_precision=self.config.get("tolerance", 0.1),
                 check_valid=True
             )
 

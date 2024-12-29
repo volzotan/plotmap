@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import fiona
 import geoalchemy2
@@ -60,8 +61,10 @@ class Cities(Layer):
 
     EXCLUDE_BUFFER_DISTANCE = 2
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_label, db)
+
+        self.config = config.get("layer", {}).get("cities", {})
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
@@ -179,8 +182,8 @@ class Cities(Layer):
 
 class CitiesLabels(Cities):
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_label, db, config)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -189,8 +192,8 @@ class CitiesLabels(Cities):
 
 class CitiesCircles(Cities):
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_label, db, config)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:

@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import shapely
 from core.maptools import DocumentInfo
@@ -20,9 +22,10 @@ class Contour(ElevationLayer):
     def __init__(self,
                  layer_name: str,
                  db: engine.Engine,
-                 elevation_anchors: list[int | float] = [0, 10000],
-                 num_elevation_lines: int = 10) -> None:
-        super().__init__(layer_name, db, elevation_anchors=elevation_anchors, num_elevation_lines=num_elevation_lines)
+                 config: dict[str, Any]) -> None:
+        super().__init__(layer_name, db, config)
+
+        self.config = {**self.config, **config.get("layer", {}).get("contour", {})}
 
         metadata = MetaData()
 

@@ -2,6 +2,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import fiona
 import geoalchemy2
@@ -79,8 +80,10 @@ class Coastlines(Layer):
     BUFFER_DISTANCE = 2
     HATCHING_DISTANCE = 2.0
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: [str, Any]) -> None:
         super().__init__(layer_label, db)
+
+        self.config = config.get("layer", {}).get("coastlines", {})
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
@@ -224,7 +227,7 @@ class Coastlines(Layer):
 
             polygons = process_polygons(
                 polygons,
-                simplify_precision=document_info.tolerance * 2,
+                simplify_precision=self.config.get("tolerance", 0.1) * 2,
                 min_area_mm2=self.FILTER_POLYGON_MIN_AREA_MAP,
                 check_empty=True,
                 check_valid=True,
