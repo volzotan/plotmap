@@ -1,0 +1,36 @@
+# basic config
+
+projection = "VAN_DER_GRINTEN_I"
+wrapover = true
+
+# units in mm
+width = 2000
+height = 1200
+
+offset_x = 0.0
+offset_y = 170
+
+tolerance = 0.1
+
+crop = true
+crop_offset_x = 500
+crop_offset_y = 350
+crop_width = 1000
+crop_height = 500
+
+[main]
+db_connection = "postgresql+psycopg://localhost:5432/lineworld"
+
+[layer.elevation]
+
+[layer.contour]
+elevation_anchors = [0, 500, 2000, 9000]
+num_elevation_lines = 24
+
+[layer.bathymetry]
+elevation_anchors = [0, -11000]
+num_elevation_lines = 15
+
+[layer.bathymetryflowlines]
+px_per_mm = 10
+blur_angles_kernel_size = 20

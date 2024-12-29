@@ -25,15 +25,16 @@ class FlowlineHatcherConfig():
     LINE_STEP_DISTANCE: float = 0.25  # distance between points constituting a line
     PX_PER_MM: int = 1
 
-    MAX_ANGLE_DISCONTINUITY: float = math.pi / 4  # max difference (in radians) in slope between line points
-    MIN_INCLINATION: float = 0.05  # 50.0
+    MAX_ANGLE_DISCONTINUITY: float = math.pi / 2  # max difference (in radians) in slope between line points
+    MIN_INCLINATION: float = 0.01  # 50.0
 
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 20  # How many line segments should be skipped before the next seedpoint is extracted
-    LINE_MAX_SEGMENTS: int = 500
+    LINE_MAX_SEGMENTS: int = 600
 
     BLUR_ANGLES: bool = True
     BLUR_ANGLES_KERNEL_SIZE: int = 3
     BLUR_DENSITY_MAP: bool = False
+    BLUR_DENSITY_KERNEL_SIZE: int = 3
 
     COLLISION_APPROXIMATE: bool = True
     VIZ_LINE_THICKNESS: int = 5
@@ -216,7 +217,10 @@ class FlowlineHatcher():
             # self.angles = cv2.GaussianBlur(self.angles, (11, 11), 0)
 
         if self.config.BLUR_DENSITY_MAP:
-            self.density = cv2.blur(self.density, (60, 60))
+            self.density = cv2.blur(
+                self.density,
+                (self.config.BLUR_DENSITY_KERNEL_SIZE, self.config.BLUR_DENSITY_KERNEL_SIZE)
+            )
 
         if self.config.COLLISION_APPROXIMATE:
             self.point_raster = np.zeros([self.bbox[3], self.bbox[2]], dtype=bool)

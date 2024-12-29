@@ -126,7 +126,9 @@ def hershey_text_to_lines(font: HersheyFonts, text: str) -> MultiLineString:
     return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
 
 
-def add_to_exclusion_zones(drawing_geometries: list[Geometry], exclusion_zones: MultiPolygon, exclude_buffer: float,
+def add_to_exclusion_zones(drawing_geometries: list[Geometry],
+                           exclusion_zones: MultiPolygon,
+                           exclude_buffer: float,
                            simplification_tolerance: float = 0.1) -> MultiPolygon:
     cutting_tool = shapely.unary_union(np.array(drawing_geometries))
     cutting_tool = cutting_tool.buffer(exclude_buffer)
