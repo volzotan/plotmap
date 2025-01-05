@@ -1,12 +1,17 @@
+from typing import Any
+
 import lxml.etree as ET
 import math
 from datetime import datetime
 import sys
 import argparse
+import shapely
 
 import numpy as np
+from shapely import LineString, Point
 
 DEFAULT_INPUT_FILENAME = "world.svg"
+DEFAULT_MAX_LENGTH_SEGMENT = 15 # in m
 
 # FILTER_BY_LAYER = ["coastlines"]
 # FILTER_BY_LAYER = ["coastlines_hatching"]
@@ -18,8 +23,6 @@ DEFAULT_INPUT_FILENAME = "world.svg"
 
 OFFSET          = [0, 0] #[-1425, -000]
 
-MAX_LENGTH_SEGMENT = 8 # in m 
-
 # Rotate by 90 degrees
 ROTATE_90       = False
 
@@ -27,18 +30,12 @@ TRAVEL_SPEED    = 5000
 WRITE_SPEED     = 4000
 PEN_LIFT_SPEED  = 1000
 
-COMP_TOLERANCE  = 0.9   #0.001
+COMP_TOLERANCE  = 0.9
 MIN_LINE_LENGTH = 0.75 # in mm
 
-# for font layers
-# COMP_TOLERANCE  = 0.001
-# MIN_LINE_LENGTH = 0.1 
-
 PEN_UP_DISTANCE = 1
-CMD_MOVE        = "G1  X{0:.3f} Y{1:.3f}\n"
+CMD_MOVE        = "G1 X{0:.3f} Y{1:.3f}\n"
 CMD_PEN_UP      = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
-
-state_pen_up    = True
 
 OPTIMIZE_ORDER  = True
 
@@ -48,7 +45,7 @@ OPTIMIZE_ORDER  = True
 
 np.set_printoptions(suppress=True)
 
-def process(e, default_namespace):
+def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, float]]:
     lines = []
 
     if e.tag == default_namespace + "rect":
@@ -114,9 +111,16 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--crop",
+        nargs="*",
+        type=int,
+        help="crop: center-X center-Y width height"
+    )
+
+    parser.add_argument(
         "--max-length-segment",
         type=int,
-        default=MAX_LENGTH_SEGMENT,
+        default=DEFAULT_MAX_LENGTH_SEGMENT,
         help="maximum length of segment [m]"
     )
 
@@ -142,43 +146,46 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    crop_region = None
+    if args.crop is not None:
+
+        if len(args.crop) != 4:
+            print(f"invalid crop arguments: {args.crop}. Must be exactly four int values: [center-X, center-Y, widht, height]")
+            sys.exit(2)
+
+        crop_region = shapely.box(
+            args.crop[0]-args.crop[2]//2,
+            args.crop[1]-args.crop[3]//2,
+            args.crop[0]+args.crop[2]//2,
+            args.crop[1]+args.crop[3]//2,
+        )
+
     args.max_length_segment *= 100*10 # m to mm
 
     tree = ET.parse(args.input_filename)
     root = tree.getroot()
-
     svg_default_namespace = "{" + root.nsmap[None] + "}"
     svg_inkscape_namespace = "{" + root.nsmap["inkscape"] + "}"
 
     output_filename = f"map_layer_{args.filter_layer}"
 
-    height = root.get("height")
-    width = root.get("width")
+    size = [root.get("width"), root.get("height")]
+    for i, dim in enumerate(size):
+        if dim.endswith("px") or dim.endswith("mm"):
+            dim = dim[:-2]
 
-    if height.endswith("px") or height.endswith("mm"):
-        height = height[:-2]
+        dim = int(dim)
 
-    height = int(height)
+        if dim is None or dim <= 0:
+            print(f"SVG size attributes not correct ({size})")
+            exit(-1)
 
-    if width.endswith("px") or height.endswith("mm"):
-        width = width[:-2]
-
-    width = int(width)
-
-    if height is None or height <= 0:
-        print(f"SVG height attribute not correct (value: {height})")
-        exit(-1)
-
-    if width is None or width <= 0:
-        print(f"SVG width attribute not correct (value: {width})")
-        exit(-1)
+        size[i] = dim
 
     if args.high_precision:
         print("set to high precision mode")
         COMP_TOLRANCE  = 0.001
         MIN_LINE_LENGTH = 0.1
-
-    size = [width, height]
 
     all_lines = []
 
@@ -186,18 +193,64 @@ if __name__ == "__main__":
 
         if args.filter_layer is not None:
             if layer.attrib["id"] != args.filter_layer:
-                print("skip layer {}".format(layer.attrib["id"]))
+                print(f"skip layer {layer.attrib['id']}")
                 continue
 
-        print("process layer: {}".format(layer.attrib["id"]))
+        print(f"process layer: {layer.attrib['id']}")
 
         for child in layer:
             all_lines = all_lines + process(child, svg_default_namespace)
 
     if args.limit > 0:
         limit = min(len(all_lines), args.limit)
-        print("processing limited to {limit} lines")
+        print(f"processing limited to {limit} lines")
         all_lines = all_lines[0:limit]
+
+    if crop_region is not None:
+        cropped_lines = []
+        crop_translation = crop_region.bounds[0:2]
+
+        for line in all_lines:
+
+            ls = LineString([line[0:2], line[2:4]])
+            result = crop_region.intersection(ls)
+
+            if result.is_empty:
+                continue
+
+
+            # print(line)
+            # print(ls)
+            # print(result)
+
+            # exit()
+
+            match result:
+                case Point():
+                    continue
+
+                case LineString():
+
+                    result = shapely.affinity.translate(
+                        result,
+                        xoff=-crop_translation[0],
+                        yoff=-crop_translation[1]
+                    )
+
+                    cropped_lines.append([
+                        result.coords[0][0],
+                        result.coords[0][1],
+                        result.coords[1][0],
+                        result.coords[1][1],
+                    ])
+
+                case _:
+                    print(f"cropping: unexpected shapely geometry: {type(result)}")
+
+            # print(cropped_lines)
+            # exit()
+
+        all_lines = cropped_lines
 
     print(" ")
     print("--------------------------------------------------")
@@ -234,6 +287,9 @@ if __name__ == "__main__":
     # mirror along X-axis to transfer SVG coordinate system (0 top left) to gcode (0 bottom left)
 
     maxy = size[1] #np.max([np.max(nplines[:, 1]), np.max(nplines[:, 3])])
+    if crop_region is not None:
+        maxy = crop_region.bounds[3] - crop_region.bounds[1]
+        print(maxy)
 
     nplines[:, 1] = np.multiply(nplines[:, 1], -1)
     nplines[:, 3] = np.multiply(nplines[:, 3], -1)
@@ -428,16 +484,18 @@ if __name__ == "__main__":
     count_draw_moves    = 0
     count_travel_moves  = 0
 
+    state_pen_up = True
+
     for s in range(0, len(segments)):
 
         segment = segments[s]
-        filename = output_filename + "_{}of{}.nc".format(s+1, len(segments))
+        filename = output_filename + f"_{s+1}of{len(segments)}.nc"
 
         with open(filename, "w") as out:
             out.write("G90\n")                          # absolute positioning
             out.write("G21\n")                          # Set Units to Millimeters
             out.write(CMD_PEN_UP)                       # move pen up
-            out.write("G1 F{}\n".format(TRAVEL_SPEED))  # Set feedrate to TRAVEL_SPEED mm/min
+            out.write(f"G1 F{TRAVEL_SPEED}\n")          # Set feedrate to TRAVEL_SPEED mm/min
             state_pen_up = True
             out.write("\n")
 
@@ -459,8 +517,8 @@ if __name__ == "__main__":
                 # pen down
                 if (state_pen_up):
 
-                    out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
-                    out.write("G1 F{}\n".format(WRITE_SPEED))
+                    out.write(f"G1 Z0 F{PEN_LIFT_SPEED}\n")
+                    out.write(f"G1 F{WRITE_SPEED}\n")
                     state_pen_up = False
 
                     count_travel_moves += 1
@@ -482,15 +540,15 @@ if __name__ == "__main__":
                             move_pen_up = False
                 if move_pen_up:
                     out.write(CMD_PEN_UP)
-                    out.write("G1 F{}\n".format(TRAVEL_SPEED))
+                    out.write(f"G1 F{TRAVEL_SPEED}\n")
                     out.write("\n")
                     state_pen_up = True
 
                     count_pen_up += 1
 
             out.write(CMD_PEN_UP)
-            out.write("G1 F{}\n".format(TRAVEL_SPEED))
-            out.write("G1 X{} Y{}\n".format(0, 0))
+            out.write(f"G1 F{TRAVEL_SPEED}\n")
+            out.write("G1 X0 Y0\n")
 
             count_pen_up += 1
 
@@ -498,7 +556,7 @@ if __name__ == "__main__":
             # out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
             # count_pen_down += 1
 
-        print("write segment {}/{}: {}".format(s+1, len(segments), filename))
+        print(f"write segment {s+1}/{len(segments)}: {filename}")
 
 
     print(f"count_pen_up:        {count_pen_up}")
