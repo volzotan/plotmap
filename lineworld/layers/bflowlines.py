@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import cv2
 import fiona
 import geoalchemy2
 import numpy as np
@@ -47,8 +48,7 @@ class BathymetryFlowlines(Layer):
 
     SOURCE_FILE = Path("data", "elevation", "gebco_mosaic.tif") # TODO
     ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
-
-    EXCLUDE_BUFFER_DISTANCE = 2
+    DENSITY_FILE = Path("blender", "output.png")
 
     def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}) -> None:
         super().__init__(layer_label, db)
@@ -57,11 +57,6 @@ class BathymetryFlowlines(Layer):
             os.makedirs(self.DATA_DIR)
 
         self.config = config.get("layer", {}).get("bathymetryflowlines", {})
-
-        self.px_per_mm = self.config.get("px_per_mm", 10.0)
-
-        self.raster_width = None
-        self.raster_height = None
 
         metadata = MetaData()
 
@@ -88,15 +83,14 @@ class BathymetryFlowlines(Layer):
             _, dst_width, dst_height = calculate_default_transform(src.crs, dst_crs, src.width, src.height, *src.bounds)
             ratio = dst_width / dst_height
 
-            dst_width = int(document_info.width * self.px_per_mm)
-            dst_height = int(document_info.width * self.px_per_mm * ratio)
+            px_per_mm = self.config.get("px_per_mm", 10.0)
+            dst_width = int(document_info.width * px_per_mm)
+            dst_height = int(document_info.width * px_per_mm * ratio)
 
             skip = False
             if self.ELEVATION_FILE.exists():
                 with rasterio.open(self.ELEVATION_FILE) as dst:
                     if dst.width == dst_width and dst.height == dst_height:
-                        self.raster_width = dst_width
-                        self.raster_height = dst_height
                         skip = True
                         logger.info("reprojected GeoTiff exists, skipping")
 
@@ -135,11 +129,7 @@ class BathymetryFlowlines(Layer):
                             resampling=Resampling.nearest
                         )
 
-                self.raster_width = dst_width
-                self.raster_height = dst_height
-
                 logger.debug(f"reprojected fo file {self.ELEVATION_FILE} | {dst_width} x {dst_height}px")
-
 
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[BathymetryFlowlinesMapLines]:
@@ -151,11 +141,24 @@ class BathymetryFlowlines(Layer):
         with rasterio.open(self.ELEVATION_FILE) as dataset:
             data = dataset.read(1)
 
-        tiler = FlowlineTiler(data, flow_config,[4, 4])
+        data = cv2.resize(data, [15000, 15000]) # TODO
+
+        density = None
+        try:
+            density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+            density = cv2.normalize(density, density, 0, 255, cv2.NORM_MINMAX).astype(np.float64)/255.0
+            density = cv2.resize(density, data.shape)
+        except Exception as e:
+            logger.error(e)
+
+        flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
+        # flow_config.MM_TO_PX_CONVERSION_FACTOR = 5
+
+        tiler = FlowlineTiler(data, density, flow_config,(self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)))
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates
-        mat = document_info.get_transformation_matrix_raster(self.raster_width, self.raster_height)
+        mat = document_info.get_transformation_matrix_raster(data.shape[1], data.shape[0])
         linestrings = [affine_transform(line, mat) for line in linestrings]
         linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
