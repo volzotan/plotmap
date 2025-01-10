@@ -85,15 +85,16 @@ class Bathymetry(ElevationLayer):
         Returns (drawing geometries, exclusion polygons)
         """
 
-        drawing_geometries = []
-        with self.db.begin() as conn:
-            result = conn.execute(select(self.map_polygon_table))
-            geoms = [to_shape(row.polygon) for row in result]
-            for g in geoms:
-                drawing_geometries.append(g.exterior)
-                drawing_geometries += g.interiors
-
-        return (drawing_geometries, exclusion_zones)
+        # Only polygon outlines
+        # drawing_geometries = []
+        # with self.db.begin() as conn:
+        #     result = conn.execute(select(self.map_polygon_table))
+        #     geoms = [to_shape(row.polygon) for row in result]
+        #     for g in geoms:
+        #         drawing_geometries.append(g.exterior)
+        #         drawing_geometries += g.interiors
+        #
+        # return (drawing_geometries, exclusion_zones)
 
         drawing_geometries = []
         with self.db.begin() as conn:
