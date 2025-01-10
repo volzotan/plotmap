@@ -26,9 +26,9 @@ OFFSET          = [0, 0] #[-1425, -000]
 # Rotate by 90 degrees
 ROTATE_90       = False
 
-TRAVEL_SPEED    = 5000
-WRITE_SPEED     = 4000
-PEN_LIFT_SPEED  = 1000
+TRAVEL_SPEED    = 6000
+WRITE_SPEED     = 5000
+PEN_LIFT_SPEED  = 2000
 
 COMP_TOLERANCE  = 0.9
 MIN_LINE_LENGTH = 0.75 # in mm
@@ -99,6 +99,28 @@ def compare_equal(e0, e1):
             return True
 
     return False
+
+# from: https://stackoverflow.com/a/34325723
+def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+        printEnd    - Optional  : end character (e.g. "\r", "\r\n") (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+    # Print New Line on Complete
+    if iteration == total:
+        print()
 
 
 if __name__ == "__main__":
@@ -198,7 +220,9 @@ if __name__ == "__main__":
 
         print(f"process layer: {layer.attrib['id']}")
 
-        for child in layer:
+        for i, child in enumerate(layer):
+            if i%100 == 0:
+                printProgressBar(i, len(layer))
             all_lines = all_lines + process(child, svg_default_namespace)
 
     if args.limit > 0:
@@ -210,20 +234,16 @@ if __name__ == "__main__":
         cropped_lines = []
         crop_translation = crop_region.bounds[0:2]
 
-        for line in all_lines:
+        for i, line in enumerate(all_lines):
+
+            if i%100 == 0:
+                printProgressBar(i, len(all_lines))
 
             ls = LineString([line[0:2], line[2:4]])
             result = crop_region.intersection(ls)
 
             if result.is_empty:
                 continue
-
-
-            # print(line)
-            # print(ls)
-            # print(result)
-
-            # exit()
 
             match result:
                 case Point():
@@ -246,9 +266,6 @@ if __name__ == "__main__":
 
                 case _:
                     print(f"cropping: unexpected shapely geometry: {type(result)}")
-
-            # print(cropped_lines)
-            # exit()
 
         all_lines = cropped_lines
 
@@ -321,7 +338,8 @@ if __name__ == "__main__":
         for i in range(0, nplines.shape[0]):
 
             if i%100 == 0:
-                print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
+                # print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
+                printProgressBar(len(ordered_lines), nplines.shape[0])
 
             last = ordered_lines[-1]
             indices_done_mask[indices_done] = True
