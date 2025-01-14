@@ -9,7 +9,7 @@ from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from loguru import logger
-from shapely import envelope, MultiLineString, MultiPolygon, LineString, Point
+from shapely import envelope, MultiLineString, MultiPolygon, LineString, Point, Polygon
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer
@@ -18,6 +18,7 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
+from lineworld.util import geometrytools
 from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
 
 
@@ -37,8 +38,13 @@ class Grid(Layer):
 
     LAT_LON_MIN_SEGMENT_LENGTH = 1e-1
 
-    def __init__(self, layer_label: str, db: engine.Engine) -> None:
+    DEFAULT_LATITUDE_LINE_DIST = 20
+    DEFAULT_LONGITUDE_LINE_DIST = 20
+
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_label, db)
+
+        self.config = config.get("layer", {}).get("grid", {})
 
     def extract(self) -> None:
         pass
@@ -76,11 +82,17 @@ class Grid(Layer):
 
         minmax_lat, minmax_lon = self._get_gridminmax(document_info)
 
-        lons = [x * distance_lat_lines for x in range(1, minmax_lon[1] // distance_lat_lines)]
-        lons = [x * -1 for x in lons] + [0] + lons
+        lons = [x * distance_lat_lines for x in range(1, (minmax_lon[1] // distance_lat_lines)+1)]
+        lons = list(reversed([x * -1 for x in lons])) + [0] + lons
 
-        lats = [x * distance_lon_lines for x in range(1, minmax_lat[1] // distance_lon_lines)]
-        lats = [x * -1 for x in lats] + [0] + lats
+        if not lons[0] == minmax_lon[0]:
+            lons = [minmax_lon[0]] + lons + [minmax_lon[1]]
+
+        lats = [x * distance_lon_lines for x in range(1, (minmax_lat[1] // distance_lon_lines)+1)]
+        lats = list(reversed(lats)) + [0] + [x * -1 for x in lats]
+
+        if not lats[0] == minmax_lat[1]:
+            lats = [minmax_lat[1]] + lats + [minmax_lat[0]]
 
         return lats, lons
 
@@ -114,6 +126,47 @@ class Grid(Layer):
 
         return [GridMapLines(None, line) for line in lines]
 
+    def _get_grid_polygons(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[
+        Polygon]:
+
+        project_func = document_info.get_projection_func(self.DATA_SRID)
+        mat = document_info.get_transformation_matrix()
+
+        minmax_lat, minmax_lon = self._get_gridminmax(document_info)
+        lats, lons = self._get_gridpositions(document_info, distance_lat_lines, distance_lon_lines)
+
+        polys = []
+        for index_lat in range(len(lats)-1):
+            for index_lon in range(len(lons)-1):
+                polys.append(shapely.box(
+                    lons[index_lon],
+                    lats[index_lat],
+                    lons[index_lon+1],
+                    lats[index_lat+1]
+                ))
+
+        polys = shapely.segmentize(polys, self.LAT_LON_MIN_SEGMENT_LENGTH)
+        polys = [shapely.ops.transform(project_func, poly) for poly in polys]
+        polys = [affine_transform(poly, mat) for poly in polys]
+
+        viewport = shapely.box(0, 0, document_info.width, document_info.width) # TODO: use document_info.get_viewport()
+
+        polys_cropped = []
+        for poly in polys:
+            cropped = shapely.intersection(viewport, poly)
+
+            if cropped.is_empty:
+                continue
+
+            if type(cropped) is MultiPolygon:
+                g = geometrytools.unpack_multipolygon(cropped)
+                polys_cropped += g
+                continue
+
+            polys_cropped.append(cropped)
+
+        return polys_cropped
+
     def transform_to_map(self, document_info: DocumentInfo) -> list[GridMapLines]:
         pass
 
@@ -131,13 +184,10 @@ class Grid(Layer):
 class GridBathymetry(Grid):
     LAYER_NAME = "GridBathymetry"
 
-    LATITUDE_LINE_DIST = 20
-    LONGITUDE_LINE_DIST = 20
-
-    EXCLUDE_BUFFER_DISTANCE = 0.3
+    DEFAULT_EXCLUDE_BUFFER_DISTANCE = 0.6
 
     def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db)
+        super().__init__(layer_label, db, config)
 
         self.config = config.get("layer", {}).get("grid", {})
         
@@ -152,7 +202,11 @@ class GridBathymetry(Grid):
         metadata.create_all(self.db)
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
-        return self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
+        return self._get_gridlines(
+            document_info,
+            self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST)
+        )
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -167,20 +221,28 @@ class GridBathymetry(Grid):
 
         # extend extrusion zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+            drawing_geometries,
+            exclusion_zones,
+            self.config.get("bathymetry_exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+            self.config.get("tolerance", 0.1)
+        )
 
         return ([], exclusion_zones)
+
+    def get_polygons(self, document_info: DocumentInfo) -> list[Polygon]:
+        return self._get_grid_polygons(
+            document_info,
+            self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST)
+        )
 
 
 class GridLabels(Grid):
     LAYER_NAME = "GridLabels"
 
-    LATITUDE_LINE_DIST = 20
-    LONGITUDE_LINE_DIST = 20
+    DEFAULT_EXCLUDE_BUFFER_DISTANCE = 2.0
 
-    EXCLUDE_BUFFER_DISTANCE = 2.0
-
-    FONT_SIZE = 5
+    DEFAULT_FONT_SIZE = 5
 
     OFFSET_TOP = 10
     OFFSET_BOTTOM = OFFSET_TOP
@@ -188,7 +250,7 @@ class GridLabels(Grid):
     OFFSET_RIGHT = OFFSET_LEFT
 
     def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db)
+        super().__init__(layer_label, db, config)
 
         self.config = config.get("layer", {}).get("grid", {})
 
@@ -204,7 +266,7 @@ class GridLabels(Grid):
 
         self.hfont = HersheyFonts()
         self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.FONT_SIZE)
+        self.hfont.normalize_rendering(self.config.get("font_size", self.DEFAULT_FONT_SIZE))
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
 
@@ -350,6 +412,6 @@ class GridLabels(Grid):
 
         # extend extrusion zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, self.config.get("tolerance", 0.1))
 
         return (drawing_geometries_cut, exclusion_zones)

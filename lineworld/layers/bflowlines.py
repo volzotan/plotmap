@@ -26,7 +26,7 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling, tr
 
 import lineworld
 from experiments.hatching import flowlines, scales
-from experiments.hatching.flowlines import FlowlineTiler
+from experiments.hatching.flowlines import FlowlineTiler, FlowlineTilerPoly
 from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
 
 @dataclass
@@ -50,13 +50,14 @@ class BathymetryFlowlines(Layer):
     ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
     DENSITY_FILE = Path("blender", "output.png")
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}, tiles:list[Polygon]=[]) -> None:
         super().__init__(layer_label, db)
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
 
         self.config = config.get("layer", {}).get("bathymetryflowlines", {})
+        self.tiles = tiles
 
         metadata = MetaData()
 
@@ -132,7 +133,7 @@ class BathymetryFlowlines(Layer):
                 logger.debug(f"reprojected fo file {self.ELEVATION_FILE} | {dst_width} x {dst_height}px")
 
 
-    def transform_to_lines(self, document_info: DocumentInfo) -> list[BathymetryFlowlinesMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo, tiles=list[Polygon]) -> list[BathymetryFlowlinesMapLines]:
 
         flow_config = flowlines.FlowlineHatcherConfig()
         flow_config = lineworld.apply_config_to_object(self.config, flow_config)
@@ -141,20 +142,26 @@ class BathymetryFlowlines(Layer):
         with rasterio.open(self.ELEVATION_FILE) as dataset:
             data = dataset.read(1)
 
-        data = cv2.resize(data, [15000, 15000]) # TODO
+        data = cv2.resize(data, [20000, 20000]) # TODO
 
         density = None
-        try:
-            density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
-            density = cv2.normalize(density, density, 0, 255, cv2.NORM_MINMAX).astype(np.float64)/255.0
-            density = cv2.resize(density, data.shape)
-        except Exception as e:
-            logger.error(e)
+        # try:
+        #     density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+        #     density = cv2.normalize(density, density, 0, 255, cv2.NORM_MINMAX).astype(np.float64)/255.0
+        #     density = cv2.resize(density, data.shape)
+        # except Exception as e:
+        #     logger.error(e)
 
         flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
         # flow_config.MM_TO_PX_CONVERSION_FACTOR = 5
 
-        tiler = FlowlineTiler(data, density, flow_config,(self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)))
+        tiler = None
+
+        if self.tiles is not None and len(self.tiles) > 0:
+            tiler = FlowlineTilerPoly(data, density, flow_config, self.tiles)
+        else:
+            tiler = FlowlineTiler(data, density, flow_config, (self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)))
+
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates

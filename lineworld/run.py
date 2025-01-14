@@ -11,11 +11,11 @@ import lineworld
 from core import maptools
 from layers import contour
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry
 
 
 def run() -> None:
-    timer_start = datetime.datetime.now()
+    timer_total_runtime = datetime.datetime.now()
 
     pr = profile.Profile()
     pr.disable()
@@ -31,8 +31,12 @@ def run() -> None:
     engine = create_engine(config["main"]["db_connection"]) # , echo=True)
     document_info = maptools.DocumentInfo(config)
 
-    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config)
-    # layer_bathymetry = bathymetry.Bathymetry("Bathymetry", engine, config)
+    layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine, config)
+    layer_grid_labels = grid.GridLabels("Grid Labels", engine, config)
+
+    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config,
+                                                      tiles=layer_grid_bathymetry.get_polygons(document_info))
+    layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry2", engine, config)
     layer_contour = contour.Contour("Contour", engine, config)
 
     layer_coastlines = coastlines.Coastlines("Coastlines", engine, config)
@@ -42,17 +46,15 @@ def run() -> None:
 
     layer_labels = labels.Labels("Labels", engine, config)
 
-    layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine, config)
-    layer_grid_labels = grid.GridLabels("Grid Labels", engine, config)
-
     active_layers = [
         layer_bathymetry,
+        # layer_bathymetry2,
         # layer_contour,
-        layer_coastlines,
+        # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
         # layer_labels,
-        # layer_grid_bathymetry,
+        layer_grid_bathymetry,
         # layer_grid_labels
     ]
 
@@ -96,8 +98,9 @@ def run() -> None:
     # draw_labels, exclude = layer_labels.out(exclude, document_info)
     draw_coastlines, exclude = layer_coastlines.out(exclude, document_info)
     # draw_contour, exclude = layer_contour.out(exclude, document_info)
-    # _, exclude = layer_grid_bathymetry.out(exclude, document_info)
+    _, exclude = layer_grid_bathymetry.out(exclude, document_info)
     draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
+    # draw_bathymetry2, exclude = layer_bathymetry2.out(exclude, document_info)
 
     svg = SvgWriter("test.svg", [document_info.width, document_info.height])
     svg.background_color = "white"
@@ -131,14 +134,14 @@ def run() -> None:
     options_bathymetry = {
         "fill": "none",
         "stroke": "blue",
-        "stroke-width": "0.5",
+        "stroke-width": "0.35",
         "fill-opacity": "0.1"
     }
 
     options_contour = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "0.4",
+        "stroke-width": "0.35",
     }
 
     options_coastlines = {
@@ -174,6 +177,7 @@ def run() -> None:
     svg.add_style("coastlines", options_coastlines)
 
     svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
+    # svg.add("bathymetry2", draw_bathymetry2, options=options_bathymetry)
     # svg.add("contour", draw_contour, options=options_contour)
     svg.add("coastlines", draw_coastlines)
     # svg.add("labels", draw_labels, options=options_labels)
@@ -183,7 +187,7 @@ def run() -> None:
 
     svg.write()
 
-    logger.info(f"total time: {(datetime.datetime.now() - timer_start).total_seconds():5.2f}s")
+    logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")
 
 
 if __name__ == "__main__":

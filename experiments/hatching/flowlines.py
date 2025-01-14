@@ -12,22 +12,30 @@ import rasterio
 import shapely
 from loguru import logger
 from matplotlib import pyplot as plt
-from shapely import LineString, Polygon
+from shapely import LineString, Polygon, Point, MultiLineString
 
 from experiments.hatching import scales
 from experiments.hatching.slope import get_slope
+from lineworld.util import geometrytools
 
 
 @dataclass
 class FlowlineHatcherConfig():
-    LINE_DISTANCE: tuple[float, float] = (0.3, 5.0)  # distance between lines in mm
-    LINE_STEP_DISTANCE: float = 0.3  # distance between points constituting a line in mm
+    # distance between lines in mm
+    LINE_DISTANCE: tuple[float, float] = (0.3, 5.0)
+
+    # distance between points constituting a line in mm
+    LINE_STEP_DISTANCE: float = 0.3
+
     MM_TO_PX_CONVERSION_FACTOR: int = 10
 
-    MAX_ANGLE_DISCONTINUITY: float = math.pi / 2  # max difference (in radians) in slope between line points
+    # max difference (in radians) in slope between line points
+    MAX_ANGLE_DISCONTINUITY: float = math.pi / 2
     MIN_INCLINATION: float = 0.001  # 50.0
 
-    SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 20  # How many line segments should be skipped before the next seedpoint is extracted
+    # How many line segments should be skipped before the next seedpoint is extracted
+    SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 10
+
     LINE_MAX_SEGMENTS: int = 5000
 
     BLUR_ANGLES: bool = True
@@ -41,6 +49,124 @@ class FlowlineHatcherConfig():
 
     COLLISION_APPROXIMATE: bool = True
     VIZ_LINE_THICKNESS: int = 5
+
+class FlowlineTilerPoly():
+
+    def __init__(self,
+                 elevation: np.ndarray,
+                 density: np.ndarray | None,
+                 config: FlowlineHatcherConfig,
+                 polygons: list[Polygon]):
+
+        self.elevation = elevation
+        self.density = density  # optional
+        self.config = config
+        self.polygons = polygons
+
+        # sanity checks
+        if self.config.MM_TO_PX_CONVERSION_FACTOR * self.config.LINE_DISTANCE[0] < 1:
+            raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
+
+        if self.config.MM_TO_PX_CONVERSION_FACTOR * self.config.LINE_STEP_DISTANCE < 1:
+            raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
+
+        # Prepare a non-linear scale for the density calculations
+        scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
+        self.density_func = (scale.apply, np.min(self.elevation), np.max(self.elevation))
+
+        if self.density is not None:
+            self.density = scale.apply(self.density)
+
+        # convert the polygons from map space to raster space
+        for i in range(len(self.polygons)):
+            self.polygons[i] = shapely.affinity.scale(
+                self.polygons[i],
+                xfact=self.config.MM_TO_PX_CONVERSION_FACTOR,
+                yfact=self.config.MM_TO_PX_CONVERSION_FACTOR,
+                origin=(0, 0)
+            )
+
+        self.tiles = [{} for _ in polygons]
+
+
+    def hatch(self) -> list[LineString]:
+
+        for i, p in enumerate(self.polygons):
+
+            logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i/len(self.polygons)*100.0:5.2f}%")
+
+            min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
+
+            density_tile = None
+            if self.density is not None:
+                density_tile = self.density[min_row:max_row, min_col:max_col]
+
+            hatcher = FlowlineHatcher(
+                p,
+                self.elevation[min_row:max_row+1, min_col:max_col+1],
+                density_tile,
+                self.density_func,
+                self.config
+            )
+
+            linestrings = hatcher.hatch()
+            linestrings = [shapely.affinity.translate(ls, xoff=min_col, yoff=min_row) for ls in linestrings]
+
+            linestrings_cropped = []
+            for ls in linestrings:
+                cropped = shapely.intersection(ls, p)
+
+                if cropped.is_empty:
+                    continue
+
+                if type(cropped) is Point:
+                    continue
+
+                if type(cropped) is MultiLineString:
+                    g = geometrytools.unpack_multilinestring(cropped)
+                    linestrings_cropped += g
+                    continue
+
+                linestrings_cropped.append(cropped)
+            linestrings = linestrings_cropped
+
+            # linestrings = [p.boundary]
+
+            self.tiles[i]["linestrings"] = linestrings
+            # self.tiles[i]["hatcher"] = hatcher
+
+        linestrings = []
+        for tile in self.tiles:
+            linestrings += tile["linestrings"]
+
+        return linestrings
+
+    def _debug_viz(self, linestrings: list[LineString]) -> None:
+
+        output = np.full([self.elevation.shape[0], self.elevation.shape[1], 3], 255, dtype=np.uint8)
+        for ls in linestrings:
+            line_points = ls.coords
+            for i in range(len(line_points) - 1):
+                start = (int(line_points[i][0]), int(line_points[i][1]))
+                end = (int(line_points[i + 1][0]), int(line_points[i + 1][1]))
+                cv2.line(output, start, end, (0, 0, 0), self.config.VIZ_LINE_THICKNESS)
+
+        output2 = np.full([self.elevation.shape[0], self.elevation.shape[1] * 2, 3], 255, dtype=np.uint8)
+
+        output2[:, 0:self.elevation.shape[1], :] = output
+
+        scale, norm_min, norm_max = self.density_func
+        density_normalized = (self.elevation - norm_min) / (norm_max - norm_min)
+        density_normalized = scale(density_normalized)
+        density_normalized *= 255
+
+        output2[:, self.elevation.shape[1]:, :] = np.dstack(
+            [density_normalized, density_normalized, density_normalized])
+
+        # divider line
+        output2[:, self.elevation.shape[1]:self.elevation.shape[1] + 2, :] = [0, 0, 0]
+
+        cv2.imwrite(Path(OUTPUT_PATH, "flowlines.png"), output2)
 
 
 class FlowlineTiler():
@@ -223,7 +349,7 @@ class FlowlineTiler():
 
 
 class FlowlineHatcher():
-    MAX_ITERATIONS = 50_000
+    MAX_ITERATIONS = 10_000_000
 
     def __init__(self, polygon: Polygon,
                  elevation: np.ndarray,
@@ -303,8 +429,7 @@ class FlowlineHatcher():
 
     def _density(self, x: int, y: int) -> float:
 
-        diff = (self.config.LINE_DISTANCE[1] * self.config.MM_TO_PX_CONVERSION_FACTOR -
-                self.config.LINE_DISTANCE[0] * self.config.MM_TO_PX_CONVERSION_FACTOR)
+        diff = (self.config.LINE_DISTANCE[1] - self.config.LINE_DISTANCE[0]) * self.config.MM_TO_PX_CONVERSION_FACTOR
 
         if self.density_map is not None:
             density_normalized = self.density_map[y, x]
@@ -422,14 +547,18 @@ class FlowlineHatcher():
         starting_points = deque()
         starting_points_priority = deque(self.initial_seed_points)
 
-        # point grid for starting points
-        for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, num=100):
-            for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, num=100):
+        # point grid for starting points, grid distance is mean line distance
+        num_gridpoints = int((self.elevation.shape[0] / self.config.MM_TO_PX_CONVERSION_FACTOR) / self.config.LINE_DISTANCE[0]) # np.mean(self.config.LINE_DISTANCE))
+        for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, num=num_gridpoints):
+            for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, num=num_gridpoints):
                 starting_points.append([i, j])
 
         for i in range(self.MAX_ITERATIONS):
 
-            if i == self.MAX_ITERATIONS - 1:
+            # if len(starting_points) % 1000 == 0:
+            #     print(f"{len(starting_points_priority)} {len(starting_points)} {len(linestrings)}")
+
+            if i >= self.MAX_ITERATIONS - 1:
                 logger.warning("max iterations exceeded")
 
             if len(starting_points) == 0:
@@ -443,10 +572,6 @@ class FlowlineHatcher():
                 seed = starting_points_priority.popleft()
             else:
                 seed = starting_points.popleft()
-
-            if seed is None:
-                logger.error("should not happen")
-                break
 
             if self._collision(*seed):
                 continue
@@ -534,8 +659,7 @@ if __name__ == "__main__":
     with rasterio.open(str(ELEVATION_FILE)) as dataset:
 
         if args["resize"] is not None:
-            data = \
-            dataset.read(out_shape=(args["resize"], args["resize"]), resampling=rasterio.enums.Resampling.bilinear)[0]
+            data = dataset.read(out_shape=(args["resize"], args["resize"]), resampling=rasterio.enums.Resampling.bilinear)[0]
         else:
             data = dataset.read(1)
 
@@ -568,11 +692,21 @@ if __name__ == "__main__":
     # pr = profile.Profile()
     # pr.enable()
 
-    tiler = FlowlineTiler(
+    # tiler = FlowlineTiler(
+    #     data,
+    #     None,
+    #     config,
+    #     [2, 2]
+    # )
+
+    tiler = FlowlineTilerPoly(
         data,
         None,
         config,
-        [2, 2]
+        [
+            Point([data.shape[1]*0.25, data.shape[0]//2]).buffer(np.min(data.shape)//4-100),
+            Point([data.shape[1]*0.75, data.shape[0]//2]).buffer(np.min(data.shape)//4-100)
+        ]
     )
 
     linestrings = tiler.hatch()

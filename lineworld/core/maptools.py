@@ -24,6 +24,8 @@ class DocumentInfo():
     EQUATOR = 40075016.68557849
 
     def __init__(self, config: dict[str, Any]):
+        self.config = config
+
         self.projection = Projection[config.get("projection", "VAN_DER_GRINTEN_I")]
         self.wrapover = config.get("wrapover", True)
 
@@ -59,8 +61,10 @@ class DocumentInfo():
         return [a, b, d, e, xoff, yoff]
 
     def get_viewport(self) -> Polygon:
-        # return shapely.box(0, 0, self.width, self.height)
-        return shapely.box(-self.width, -self.height, self.width*2, self.height*2)
+        if self.config.get("debug", False):
+            return shapely.box(-self.width, -self.height, self.width*2, self.height*2)
+        else:
+            return shapely.box(0, 0, self.width, self.height)
 
     def get_projection_func(self, src_projection: Projection) -> Any:
         crs_src = pyproj.CRS(f"{src_projection.value[0]}:{src_projection.value[1]}")
