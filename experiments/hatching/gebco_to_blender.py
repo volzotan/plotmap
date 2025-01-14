@@ -12,11 +12,14 @@ DATA_DIR = Path("experiments/hatching/data", "GebcoToBlender".lower())
 TILES_DIR = Path(DATA_DIR, "tiles")
 SCALED_DIR = Path(DATA_DIR, "scaled")
 MOSAIC_FILE = Path(DATA_DIR, "gebco_mosaic.tif")
-REPROJECT_FILE = Path(DATA_DIR, "reproject.tif")
+REPROJECT_FILE = Path(DATA_DIR, "blender_reproject.tif")
 
+GEOTIFF_SCALING_FACTOR = 1/8 # correct ratio for blender
+
+REPROJECT_FILE = Path(DATA_DIR, "fullsize_reproject.tif")
 GEOTIFF_SCALING_FACTOR = 1
-# GEOTIFF_SCALING_FACTOR = 1/8 # correct ratio for blender
 
+OVERWRITE = True
 
 def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: float) -> None:
     """
@@ -113,18 +116,18 @@ if __name__ == "__main__":
         scaled_path = Path(SCALED_DIR, dataset_file.name)
         scaled_files.append(scaled_path)
 
-        # if scaled_path.exists():
-        #     continue
+        if scaled_path.exists() and not OVERWRITE:
+            continue
 
         logger.debug(f"downscaling tile: {dataset_file}")
         downscale_and_write(dataset_file, scaled_path, GEOTIFF_SCALING_FACTOR)
 
     # Merging tiles into a mosaic
-    # if not MOSAIC_FILE.exists():
-    logger.debug("merging mosaic tiles")
-    merge_and_write(scaled_files, MOSAIC_FILE)
+    if not MOSAIC_FILE.exists() or OVERWRITE:
+        logger.debug("merging mosaic tiles")
+        merge_and_write(scaled_files, MOSAIC_FILE)
 
     # Reprojecting
-    # if not REPROJECT_FILE.exists():
-    logger.debug("reprojecting mosaic")
-    reproject_dataset(MOSAIC_FILE, REPROJECT_FILE)
+    if not REPROJECT_FILE.exists() or OVERWRITE:
+        logger.debug("reprojecting mosaic")
+        reproject_dataset(MOSAIC_FILE, REPROJECT_FILE)
