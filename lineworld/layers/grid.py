@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass
 from typing import Any
 
@@ -149,23 +150,28 @@ class Grid(Layer):
         polys = [shapely.ops.transform(project_func, poly) for poly in polys]
         polys = [affine_transform(poly, mat) for poly in polys]
 
-        viewport = shapely.box(0, 0, document_info.width, document_info.width) # TODO: use document_info.get_viewport()
+        viewport = shapely.box(0, 0, document_info.width, document_info.height) # TODO: use document_info.get_viewport()
 
         polys_cropped = []
         for poly in polys:
             cropped = shapely.intersection(viewport, poly)
 
-            if cropped.is_empty:
-                continue
-
             if type(cropped) is MultiPolygon:
                 g = geometrytools.unpack_multipolygon(cropped)
                 polys_cropped += g
-                continue
+            else:
+                polys_cropped.append(cropped)
 
-            polys_cropped.append(cropped)
+        polys_cropped_nonempty = []
+        for poly in polys_cropped:
+            if not poly.is_empty:
+                polys_cropped_nonempty.append(poly)
 
-        return polys_cropped
+        # polys_cropped = list(itertools.filterfalse(shapely.is_empty, polys_cropped))
+
+        return polys_cropped_nonempty
+
+        # return polys
 
     def transform_to_map(self, document_info: DocumentInfo) -> list[GridMapLines]:
         pass

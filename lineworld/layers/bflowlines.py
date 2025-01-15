@@ -50,14 +50,14 @@ class BathymetryFlowlines(Layer):
     ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
     DENSITY_FILE = Path("blender", "output.png")
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}, tiles:list[Polygon]=[]) -> None:
+    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}, tile_boundaries:list[Polygon]=[]) -> None:
         super().__init__(layer_label, db)
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)
 
         self.config = config.get("layer", {}).get("bathymetryflowlines", {})
-        self.tiles = tiles
+        self.tile_boundaries = tile_boundaries
 
         metadata = MetaData()
 
@@ -133,7 +133,7 @@ class BathymetryFlowlines(Layer):
                 logger.debug(f"reprojected fo file {self.ELEVATION_FILE} | {dst_width} x {dst_height}px")
 
 
-    def transform_to_lines(self, document_info: DocumentInfo, tiles=list[Polygon]) -> list[BathymetryFlowlinesMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[BathymetryFlowlinesMapLines]:
 
         flow_config = flowlines.FlowlineHatcherConfig()
         flow_config = lineworld.apply_config_to_object(self.config, flow_config)
@@ -153,19 +153,21 @@ class BathymetryFlowlines(Layer):
         #     logger.error(e)
 
         flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
-        # flow_config.MM_TO_PX_CONVERSION_FACTOR = 5
 
         tiler = None
+        if self.tile_boundaries is not None and len(self.tile_boundaries) > 0:
+            # convert from map coordinates to raster pixel coordinates
+            mat = document_info.get_transformation_matrix_map_to_raster(data.shape[1], data.shape[0])
+            raster_tile_boundaries = [affine_transform(boundary, mat) for boundary in self.tile_boundaries]
 
-        if self.tiles is not None and len(self.tiles) > 0:
-            tiler = FlowlineTilerPoly(data, density, flow_config, self.tiles)
+            tiler = FlowlineTilerPoly(data, density, flow_config, raster_tile_boundaries)
         else:
             tiler = FlowlineTiler(data, density, flow_config, (self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)))
 
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates
-        mat = document_info.get_transformation_matrix_raster(data.shape[1], data.shape[0])
+        mat = document_info.get_transformation_matrix_raster_to_map(data.shape[1], data.shape[0])
         linestrings = [affine_transform(line, mat) for line in linestrings]
         linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
