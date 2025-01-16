@@ -1,8 +1,14 @@
-.idea/**
-.venv/**
+.idea/*
+.venv/*
 
-data/**
-_db/**
+data/*
+_db/*
+tmp/*
 
 *.pyc
+*.nc
+*.pstat
 
+REFERENCE_MAPS/*
+
+experiments/conductor/*
