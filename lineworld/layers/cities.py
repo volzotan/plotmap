@@ -61,8 +61,8 @@ class Cities(Layer):
 
     EXCLUDE_BUFFER_DISTANCE = 2
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db)
 
         self.config = config.get("layer", {}).get("cities", {})
 
@@ -175,15 +175,15 @@ class Cities(Layer):
 
         # and add buffered lines to exclusion_zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, self.config.get("tolerance", 0.1))
 
         return (drawing_geometries, exclusion_zones)
 
 
 class CitiesLabels(Cities):
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db, config)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db, config)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:
@@ -192,8 +192,8 @@ class CitiesLabels(Cities):
 
 class CitiesCircles(Cities):
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db, config)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db, config)
 
     def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
         list[shapely.Geometry], MultiPolygon]:

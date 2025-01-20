@@ -42,8 +42,8 @@ class Grid(Layer):
     DEFAULT_LATITUDE_LINE_DIST = 20
     DEFAULT_LONGITUDE_LINE_DIST = 20
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db)
 
         self.config = config.get("layer", {}).get("grid", {})
 
@@ -192,8 +192,8 @@ class GridBathymetry(Grid):
 
     DEFAULT_EXCLUDE_BUFFER_DISTANCE = 0.6
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db, config)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db, config)
 
         self.config = config.get("layer", {}).get("grid", {})
         
@@ -255,8 +255,8 @@ class GridLabels(Grid):
     OFFSET_LEFT = 5
     OFFSET_RIGHT = OFFSET_LEFT
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db, config)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db, config)
 
         self.config = config.get("layer", {}).get("grid", {})
 
@@ -276,8 +276,14 @@ class GridLabels(Grid):
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
 
-        gridlines = self._get_gridlines(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
-        lats, lons = self._get_gridpositions(document_info, self.LATITUDE_LINE_DIST, self.LONGITUDE_LINE_DIST)
+        gridlines = self._get_gridlines(
+            document_info,
+            self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST))
+        lats, lons = self._get_gridpositions(
+            document_info,
+            self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST))
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()

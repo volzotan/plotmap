@@ -50,8 +50,8 @@ class BathymetryFlowlines(Layer):
     ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
     DENSITY_FILE = Path("blender", "output.png")
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]={}, tile_boundaries:list[Polygon]=[]) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]={}, tile_boundaries:list[Polygon]=[]) -> None:
+        super().__init__(layer_id, db)
 
         if not self.DATA_DIR.exists():
             os.makedirs(self.DATA_DIR)

@@ -2,8 +2,8 @@ from sqlalchemy import engine
 
 class Layer():
 
-    def __init__(self, layer_name: str, db: engine.Engine):
-        self.layer_name = layer_name
+    def __init__(self, layer_id: str, db: engine.Engine):
+        self.layer_id = layer_id
         self.db = db
 
     def transform_to_world(self):

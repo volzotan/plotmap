@@ -19,10 +19,10 @@ from lineworld.util.geometrytools import unpack_multipolygon
 class Bathymetry(ElevationLayer):
 
     def __init__(self,
-                 layer_name: str,
+                 layer_id: str,
                  db: engine.Engine,
                  config: dict[str, Any]) -> None:
-        super().__init__(layer_name, db, config)
+        super().__init__(layer_id, db, config)
 
         self.config = {**self.config, **config.get("layer", {}).get("bathymetry", {})}
 

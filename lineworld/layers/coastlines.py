@@ -80,8 +80,8 @@ class Coastlines(Layer):
     BUFFER_DISTANCE = 2
     HATCHING_DISTANCE = 2.0
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: [str, Any]) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_id: str, db: engine.Engine, config: [str, Any]) -> None:
+        super().__init__(layer_id, db)
 
         self.config = config.get("layer", {}).get("coastlines", {})
 

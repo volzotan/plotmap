@@ -99,10 +99,10 @@ class ElevationLayer(Layer):
     WRAPOVER_LONGITUDE_EXTENSION = 60
 
     def __init__(self,
-                 layer_name: str,
+                 layer_id: str,
                  db: engine.Engine,
                  config: dict[str, Any]) -> None:
-        super().__init__(layer_name, db)
+        super().__init__(layer_id, db)
 
         self.config = config.get("layer", {}).get("elevation", {})
 
