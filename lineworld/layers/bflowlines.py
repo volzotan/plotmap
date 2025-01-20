@@ -142,15 +142,23 @@ class BathymetryFlowlines(Layer):
         with rasterio.open(self.ELEVATION_FILE) as dataset:
             data = dataset.read(1)
 
-        data = cv2.resize(data, [20000, 20000]) # TODO
+        data = cv2.resize(data, [15000, 15000]) # TODO
 
         density = None
-        # try:
-        #     density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
-        #     density = cv2.normalize(density, density, 0, 255, cv2.NORM_MINMAX).astype(np.float64)/255.0
-        #     density = cv2.resize(density, data.shape)
-        # except Exception as e:
-        #     logger.error(e)
+        try:
+
+            # use uint8 for the density map to save some memory and 256 values will be enough precision
+            density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+            density = (np.iinfo(np.uint8).max*((density - np.min(density))/np.ptp(density))).astype(np.uint8)
+            density = cv2.resize(density, data.shape)
+
+            # 50:50 blend of elevation data and externally computed density image
+            data_normalized = (np.iinfo(np.uint8).max*((data - np.min(data))/np.ptp(data))).astype(np.uint8)
+
+            density = np.mean(np.dstack([density, data_normalized]), axis=2).astype(np.uint8)
+
+        except Exception as e:
+            logger.error(e)
 
         flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
 
