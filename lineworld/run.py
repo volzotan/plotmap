@@ -3,6 +3,7 @@ import cProfile as profile
 import datetime
 
 import fire
+import numpy as np
 from loguru import logger
 from shapely.geometry import MultiPolygon
 from sqlalchemy import create_engine
@@ -10,6 +11,7 @@ from sqlalchemy import create_engine
 import lineworld
 from core import maptools
 from layers import contour
+from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry
 
@@ -32,10 +34,10 @@ def run() -> None:
     document_info = maptools.DocumentInfo(config)
 
     layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine, config)
-    layer_grid_labels = grid.GridLabels("Grid Labels", engine, config)
+    layer_grid_labels = grid.GridLabels("GridLabels", engine, config)
 
     layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config,
-                                                      tiles=layer_grid_bathymetry.get_polygons(document_info))
+                                                      tile_boundaries=layer_grid_bathymetry.get_polygons(document_info))
     layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry2", engine, config)
     layer_contour = contour.Contour("Contour", engine, config)
 
@@ -46,7 +48,7 @@ def run() -> None:
 
     layer_labels = labels.Labels("Labels", engine, config)
 
-    active_layers = [
+    compute_layers = [
         layer_bathymetry,
         # layer_bathymetry2,
         # layer_contour,
@@ -54,12 +56,12 @@ def run() -> None:
         # layer_cities_labels,
         # layer_cities_circles,
         # layer_labels,
-        layer_grid_bathymetry,
+        # layer_grid_bathymetry,
         # layer_grid_labels
     ]
 
-    for layer in active_layers:
-        # layer.extract()
+    for layer in compute_layers:
+        layer.extract()
 
         timer_start = datetime.datetime.now()
         polygons = layer.transform_to_world()
@@ -90,17 +92,24 @@ def run() -> None:
 
     # pr.dump_stats('profile.pstat')
 
-    exclude = MultiPolygon()
+    visible_layers = [
+        # layer_cities_labels,
+        # layer_cities_circles,
+        # layer_grid_labels,
+        # layer_labels,
+        layer_coastlines,
+        # layer_contour,
+        layer_grid_bathymetry,
+        layer_bathymetry,
+        # layer_bathymetry2,
+    ]
 
-    # draw_cities_labels, exclude = layer_cities_labels.out(exclude, document_info)
-    # draw_cities_circles, exclude = layer_cities_circles.out(exclude, document_info)
-    # draw_grid_labels, exclude = layer_grid_labels.out(exclude, document_info)
-    # draw_labels, exclude = layer_labels.out(exclude, document_info)
-    draw_coastlines, exclude = layer_coastlines.out(exclude, document_info)
-    # draw_contour, exclude = layer_contour.out(exclude, document_info)
-    _, exclude = layer_grid_bathymetry.out(exclude, document_info)
-    draw_bathymetry, exclude = layer_bathymetry.out(exclude, document_info)
-    # draw_bathymetry2, exclude = layer_bathymetry2.out(exclude, document_info)
+    exclude = MultiPolygon()
+    draw_objects = {}
+
+    for layer in visible_layers:
+        draw, exclude = layer.out(exclude, document_info)
+        draw_objects[layer.layer_id] = draw
 
     svg = SvgWriter("test.svg", [document_info.width, document_info.height])
     svg.background_color = "white"
@@ -131,59 +140,56 @@ def run() -> None:
     #     color = "rgb({},{},{})".format(*[int(x * 255) for x in scale.get_color(i)])
     #     svg.add(f"contour_polys_{i}", polys, options=options_contour | {"fill": color})
 
-    options_bathymetry = {
+    layer_styles = {}
+
+    layer_styles[layer_bathymetry.layer_id] = {
         "fill": "none",
         "stroke": "blue",
-        "stroke-width": "0.35",
+        "stroke-width": "0.40",
         "fill-opacity": "0.1"
     }
 
-    options_contour = {
+    layer_styles[layer_contour.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "0.35",
+        "stroke-width": "0.40",
     }
 
-    options_coastlines = {
+    layer_styles[layer_coastlines.layer_id] = {
         "fill": "none",
         "stroke": "black",
         "stroke-width": "0.5",
     }
 
-    options_grid = {
+    layer_styles[layer_grid_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
         "stroke-width": "1.0",
     }
 
-    options_labels = {
+    layer_styles[layer_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
         "stroke-width": "1.0",
     }
 
-    options_cities_labels = {
+    layer_styles[layer_cities_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
         "stroke-width": "1.0",
     }
 
-    options_cities_circles = {
+    layer_styles[layer_cities_circles.layer_id] = {
         "fill": "none",
         "stroke": "red",
         "stroke-width": "1.0",
     }
 
-    svg.add_style("coastlines", options_coastlines)
+    for k, v in layer_styles.items():
+        svg.add_style(k, v)
 
-    svg.add("bathymetry", draw_bathymetry, options=options_bathymetry)
-    # svg.add("bathymetry2", draw_bathymetry2, options=options_bathymetry)
-    # svg.add("contour", draw_contour, options=options_contour)
-    svg.add("coastlines", draw_coastlines)
-    # svg.add("labels", draw_labels, options=options_labels)
-    # svg.add("grid_labels", draw_grid_labels, options=options_grid)
-    # svg.add("cities_labels", draw_cities_labels, options=options_cities_labels)
-    # svg.add("cities_circles", draw_cities_circles, options=options_cities_circles)
+    for k, v in draw_objects.items():
+        svg.add(k, v) #, options=layer_styles.get(k.lower(), {}))
 
     svg.write()
 

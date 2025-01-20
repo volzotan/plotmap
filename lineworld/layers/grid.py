@@ -162,14 +162,9 @@ class Grid(Layer):
             else:
                 polys_cropped.append(cropped)
 
-        polys_cropped_nonempty = []
-        for poly in polys_cropped:
-            if not poly.is_empty:
-                polys_cropped_nonempty.append(poly)
+        polys_cropped = list(itertools.filterfalse(shapely.is_empty, polys_cropped))
 
-        # polys_cropped = list(itertools.filterfalse(shapely.is_empty, polys_cropped))
-
-        return polys_cropped_nonempty
+        return polys_cropped
 
         # return polys
 
@@ -329,8 +324,8 @@ class GridLabels(Grid):
 
             intersect_point_bottom = lon_line.intersection(
                 LineString([
-                    [0, document_info.height - self.OFFSET_BOTTOM + self.FONT_SIZE],
-                    [document_info.width, document_info.height - self.OFFSET_BOTTOM + self.FONT_SIZE]
+                    [0, document_info.height - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE)],
+                    [document_info.width, document_info.height - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE)]
                 ])
             )
 
@@ -424,6 +419,8 @@ class GridLabels(Grid):
 
         # extend extrusion zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, self.config.get("tolerance", 0.1))
+            drawing_geometries, exclusion_zones,
+            self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+            self.config.get("tolerance", 0.1))
 
         return (drawing_geometries_cut, exclusion_zones)

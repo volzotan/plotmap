@@ -60,12 +60,12 @@ class Labels(Layer):
     LAT_LON_PRECISION = 0.01
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
 
-    EXCLUDE_BUFFER_DISTANCE = 2
+    DEFAULT_EXCLUDE_BUFFER_DISTANCE = 2
 
-    FONT_SIZE = 12
+    DEFAULT_FONT_SIZE = 12
 
-    def __init__(self, layer_label: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_label, db)
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
+        super().__init__(layer_id, db)
 
         self.config = config.get("layer", {}).get("labels", {})
 
@@ -84,7 +84,7 @@ class Labels(Layer):
 
         self.hfont = HersheyFonts()
         self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.FONT_SIZE)
+        self.hfont.normalize_rendering(self.config.get("font_size", self.DEFAULT_FONT_SIZE))
 
     def extract(self) -> None:
         pass
@@ -160,6 +160,8 @@ class Labels(Layer):
 
         # and add buffered lines to exclusion_zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, document_info.tolerance)
+            drawing_geometries, exclusion_zones,
+            self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+            self.config.get("tolerance", 0.1))
 
         return (drawing_geometries, exclusion_zones)
