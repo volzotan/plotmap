@@ -46,7 +46,7 @@ def quadratic_bezier(p1=[.25, .25], p2=[.75, .75], lut_size=LUT_SIZE) -> np.ndar
     x = ((1 - t) ** 3) * p0[0] + 3 * ((1 - t) ** 2) * t * p1[0] + 3 * (1 - t) * (t ** 2) * p2[0] + (t ** 3) * p3[0]
     y = ((1 - t) ** 3) * p0[1] + 3 * ((1 - t) ** 2) * t * p1[1] + 3 * (1 - t) * (t ** 2) * p2[1] + (t ** 3) * p3[1]
 
-    lut = np.full([lut_size], -1, dtype=float)
+    lut = np.full([lut_size], -1, dtype=np.float64)
 
     for i in range(0, x.shape[0]):
         lut[int(x[i] * (lut_size-1))] = y[i]
@@ -70,14 +70,22 @@ class Scale():
         self.num_output_bins = num_output_bins
         self.lut = self.func(**self.params)
 
-    def apply(self, values: np.ndarray) -> None:
-        output = self.lut[(values * (self.lut.shape[0] - 1)).astype(int)]
+    def apply(self, values: np.ndarray) -> np.ndarray:
 
-        if self.num_output_bins is None:
-            return output
-        else:
-            return np.digitize(output, np.linspace(0, 1, num=self.num_output_bins))
+        output = None
 
+        if not values.dtype == np.float64:
+            output = (values / np.iinfo(values.dtype).max).astype(np.float64)
+
+        output = self.lut[(output * (self.lut.shape[0] - 1)).astype(int)] # returns dtype np.float64
+
+        if self.num_output_bins is not None:
+            output = np.digitize(output, np.linspace(0, 1, num=self.num_output_bins))
+
+        if not values.dtype == np.float64:
+            output = (output * np.iinfo(values.dtype).max).astype(values.dtype)
+
+        return output
 
 if __name__ == "__main__":
 
