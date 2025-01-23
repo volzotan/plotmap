@@ -46,28 +46,32 @@ class Cities(Layer):
     DATA_URL = ""
     DATA_SRID = Projection.WGS84
 
-    LAYER_NAME = "Cities"
-    DATA_DIR = Path("data", LAYER_NAME.lower())
+    DEFAULT_LAYER_NAME = "Cities"
 
-    CITIES_FILE = Path(DATA_DIR, "world-townspots-z5.json")
-    LABELS_FILE = Path(DATA_DIR, "world-labels-z5.json")
+    DEFAULT_CITIES_FILENAME = "world-townspots-z5.json"
+    DEFAULT_LABELS_FILENAME = "world-labels-z5.json"
 
     # simplification tolerance in WGS84 latlon, resolution: 1°=111.32km (equator worst case)
     LAT_LON_PRECISION = 0.01
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
 
-    FONT_SIZE = 5
-    CITY_CIRCLE_RADIUS = 2
+    DEFAULT_FONT_SIZE = 5
+    DEFAULT_CITY_CIRCLE_RADIUS = 2
 
-    EXCLUDE_BUFFER_DISTANCE = 2
+    DEFAULT_EXCLUDE_BUFFER_DISTANCE = 2
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_id, db)
+        super().__init__(layer_id, db, config)
 
-        self.config = config.get("layer", {}).get("cities", {})
+        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.cities_file = Path(self.data_dir, self.config.get("cities_filename", self.DEFAULT_CITIES_FILENAME))
+        self.labels_file = Path(self.data_dir, self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME))
+        self.font_size =  self.config.get("font_size", self.DEFAULT_FONT_SIZE)
+        self.city_circle_radius = self.config.get("city_circle_radius", self.DEFAULT_CITY_CIRCLE_RADIUS)
+        self.exclude_buffer_distance = self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE)
 
-        if not self.DATA_DIR.exists():
-            os.makedirs(self.DATA_DIR)
+        if not self.data_dir.exists():
+            os.makedirs(self.data_dir)
 
         metadata = MetaData()
 
@@ -81,7 +85,7 @@ class Cities(Layer):
 
         self.hfont = HersheyFonts()
         self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.FONT_SIZE)
+        self.hfont.normalize_rendering(self.font_size)
 
     def extract(self) -> None:
         pass
@@ -103,7 +107,7 @@ class Cities(Layer):
 
         lines = []
 
-        for item in fiona.open(self.CITIES_FILE):
+        for item in fiona.open(self.cities_file):
             shapefile_geom = shape(item["geometry"])
             geom = shapely.ops.transform(project_func, shapefile_geom)
             geom = affine_transform(geom, mat)
@@ -119,7 +123,7 @@ class Cities(Layer):
             city_name.append(item["properties"]["name"])  # label placement computation is done with name, not asciiname
             # city_name.append(item["properties"]["asciiname"])
 
-        for item in fiona.open(self.LABELS_FILE):
+        for item in fiona.open(self.labels_file):
             shapefile_geom = shape(item["geometry"])
             geom = shapely.ops.transform(project_func, shapefile_geom)
             geom = affine_transform(geom, mat)
@@ -134,10 +138,10 @@ class Cities(Layer):
             c = [minx, maxy]
             text_lines = hershey_text_to_lines(self.hfont, city_name[i])
             text_lines = shapely.affinity.scale(text_lines, xfact=1, yfact=-1, origin=Point(0, 0))
-            text_lines = shapely.affinity.translate(text_lines, xoff=c[0] + self.CITY_CIRCLE_RADIUS - 0.75,
+            text_lines = shapely.affinity.translate(text_lines, xoff=c[0] + self.city_circle_radius - 0.75,
                                                     yoff=c[1] + 0.4)
 
-            lines.append(CitiesLines(None, city_pos[i].buffer(self.CITY_CIRCLE_RADIUS).exterior, text_lines))
+            lines.append(CitiesLines(None, city_pos[i].buffer(self.city_circle_radius).exterior, text_lines))
 
         return lines
 
@@ -175,7 +179,7 @@ class Cities(Layer):
 
         # and add buffered lines to exclusion_zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.EXCLUDE_BUFFER_DISTANCE, self.config.get("tolerance", 0.1))
+            drawing_geometries, exclusion_zones, self.exclude_buffer_distance, self.config.get("tolerance", 0.1))
 
         return (drawing_geometries, exclusion_zones)
 

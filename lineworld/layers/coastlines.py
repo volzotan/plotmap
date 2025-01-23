@@ -61,12 +61,10 @@ class CoastlineLines():
 
 
 class Coastlines(Layer):
-    DATA_URL = "https://osmdata.openstreetmap.de/download/land-polygons-complete-4326.zip"
+    DEFAULT_DATA_URL = "https://osmdata.openstreetmap.de/download/land-polygons-complete-4326.zip"
     DATA_SRID = Projection.WGS84
 
-    LAYER_NAME = "Coastlines"
-    DATA_DIR = Path("data", LAYER_NAME.lower())
-    SHAPEFILE_DIR = Path(DATA_DIR, Path(DATA_URL).stem)
+    DEFAULT_LAYER_NAME = "Coastlines"
 
     # minimal area of land polygons on the map (in map units, mm^2)
     FILTER_POLYGON_MIN_AREA_MAP = 1.0
@@ -77,18 +75,24 @@ class Coastlines(Layer):
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
     WRAPOVER_LONGITUDE_EXTENSION = 60
 
-    BUFFER_DISTANCE = 2
-    HATCHING_DISTANCE = 2.0
+    DEFAULT_BUFFER_DISTANCE = 2
+    DEFAULT_HATCHING_DISTANCE = 2.0
 
     def __init__(self, layer_id: str, db: engine.Engine, config: [str, Any]) -> None:
-        super().__init__(layer_id, db)
+        super().__init__(layer_id, db, config)
 
-        self.config = config.get("layer", {}).get("coastlines", {})
+        self.data_url = self.config.get("data_url", self.DEFAULT_DATA_URL)
 
-        if not self.DATA_DIR.exists():
-            os.makedirs(self.DATA_DIR)
-        if not self.SHAPEFILE_DIR.exists():
-            os.makedirs(self.SHAPEFILE_DIR)
+        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.shapefile_dir = Path(self.data_dir, Path(self.data_url).stem)
+
+        self.buffer_distance = self.config.get("buffer_distance", self.DEFAULT_BUFFER_DISTANCE)
+        self.hatching_distance = self.config.get("hatching_distance", self.DEFAULT_HATCHING_DISTANCE)
+
+        if not self.data_dir.exists():
+            os.makedirs(self.data_dir)
+        if not self.shapefile_dir.exists():
+            os.makedirs(self.shapefile_dir)
 
         metadata = MetaData()
 
@@ -110,22 +114,22 @@ class Coastlines(Layer):
 
     def extract(self) -> None:
 
-        filename_zip = Path(self.DATA_DIR, Path(self.DATA_URL).name)
+        filename_zip = Path(self.data_dir, Path(self.DATA_URL).name)
 
         if not filename_zip.exists():
-            logger.info(f"Downloading: {self.DATA_URL}")
-            downloader.download_file(self.DATA_URL, filename_zip)
+            logger.info(f"Downloading: {self.data_url}")
+            downloader.download_file(self.data_url, filename_zip)
 
-        shapefiles = [f for f in self.SHAPEFILE_DIR.iterdir() if f.is_file() and f.suffix == ".shp"]
+        shapefiles = [f for f in self.shapefile_dir.iterdir() if f.is_file() and f.suffix == ".shp"]
         if len(shapefiles) == 0:
             logger.info(f"Unpacking OSM land polygon shapefiles: {filename_zip.name}")
-            shutil.unpack_archive(filename_zip, self.DATA_DIR)
+            shutil.unpack_archive(filename_zip, self.data_dir)
 
     def transform_to_world(self) -> list[LandPolygon]:
 
         logger.info("extracting land polygons from OSM shapefile")
 
-        shapefiles = [Path(f) for f in self.SHAPEFILE_DIR.iterdir() if f.is_file() and f.suffix == ".shp"]
+        shapefiles = [Path(f) for f in self.shapefile_dir.iterdir() if f.is_file() and f.suffix == ".shp"]
 
         if len(shapefiles) == 0:
             logger.warning("no shapefiles to transform")
@@ -247,7 +251,7 @@ class Coastlines(Layer):
 
         logger.debug("union done")
 
-        buffered = inner.buffer(self.BUFFER_DISTANCE)
+        buffered = inner.buffer(self.buffer_distance)
         buffered = shapely.difference(buffered, inner)
 
         logger.debug("buffer + difference done")
@@ -260,7 +264,7 @@ class Coastlines(Layer):
         logger.debug("hatching begin")
 
         hatching_options = HatchingOptions()
-        hatching_options.distance = self.HATCHING_DISTANCE
+        hatching_options.distance = self.hatching_distance
         hatching_options.direction = HatchingDirection.ANGLE_45
 
         hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)

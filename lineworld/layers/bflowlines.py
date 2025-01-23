@@ -43,21 +43,20 @@ class BathymetryFlowlines(Layer):
     DATA_URL = ""
     DATA_SRID = Projection.WGS84
 
-    LAYER_NAME = "BathymetryFlowlines"
-    DATA_DIR = Path("data", LAYER_NAME.lower())
-
-    SOURCE_FILE = Path("data", "elevation", "gebco_mosaic.tif") # TODO
-    ELEVATION_FILE = Path(DATA_DIR, "flowlines_elevation.tif")
-    DENSITY_FILE = Path("blender", "output.png")
+    DEFAULT_LAYER_NAME = "BathymetryFlowlines"
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]={}, tile_boundaries:list[Polygon]=[]) -> None:
-        super().__init__(layer_id, db)
+        super().__init__(layer_id, db, config)
 
-        if not self.DATA_DIR.exists():
-            os.makedirs(self.DATA_DIR)
-
-        self.config = config.get("layer", {}).get("bathymetryflowlines", {})
         self.tile_boundaries = tile_boundaries
+
+        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.source_file = Path(Layer.DATA_DIR_NAME, "elevation", "gebco_mosaic.tif")  # TODO: hardcoded reference to elevation layer
+        self.elevation_file = Path(self.data_dir, "flowlines_elevation.tif")
+        self.density_file = Path("blender", "output.png")
+
+        if not self.data_dir.exists():
+            os.makedirs(self.data_dir)
 
         metadata = MetaData()
 
@@ -77,7 +76,7 @@ class BathymetryFlowlines(Layer):
     def transform_to_map(self, document_info: DocumentInfo) -> None:
         logger.info("reprojecting GeoTiff")
 
-        with rasterio.open(self.SOURCE_FILE) as src:
+        with rasterio.open(self.source_file) as src:
             dst_crs = f"{document_info.projection.value[0]}:{document_info.projection.value[1]}"
 
             # calculate optimal output dimensions to get the width/height-ratio after reprojection
@@ -89,8 +88,8 @@ class BathymetryFlowlines(Layer):
             dst_height = int(document_info.width * px_per_mm * ratio)
 
             skip = False
-            if self.ELEVATION_FILE.exists():
-                with rasterio.open(self.ELEVATION_FILE) as dst:
+            if self.elevation_file.exists():
+                with rasterio.open(self.elevation_file) as dst:
                     if dst.width == dst_width and dst.height == dst_height:
                         skip = True
                         logger.info("reprojected GeoTiff exists, skipping")
@@ -113,7 +112,7 @@ class BathymetryFlowlines(Layer):
                     'height': dst_height
                 })
 
-                with rasterio.open(self.ELEVATION_FILE, "w", **kwargs) as dst:
+                with rasterio.open(self.elevation_file, "w", **kwargs) as dst:
                     for i in range(1, src.count + 1):
                         band_arr = src.read(i)
 
@@ -130,7 +129,7 @@ class BathymetryFlowlines(Layer):
                             resampling=Resampling.nearest
                         )
 
-                logger.debug(f"reprojected fo file {self.ELEVATION_FILE} | {dst_width} x {dst_height}px")
+                logger.debug(f"reprojected fo file {self.elevation_file} | {dst_width} x {dst_height}px")
 
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[BathymetryFlowlinesMapLines]:
@@ -139,16 +138,16 @@ class BathymetryFlowlines(Layer):
         flow_config = lineworld.apply_config_to_object(self.config, flow_config)
 
         data = None
-        with rasterio.open(self.ELEVATION_FILE) as dataset:
+        with rasterio.open(self.elevation_file) as dataset:
             data = dataset.read(1)
 
-        data = cv2.resize(data, [15000, 15000]) # TODO
+        data = cv2.resize(data, [document_info.width * 10, document_info.width * 10]) # TODO
 
         density = None
         try:
 
             # use uint8 for the density map to save some memory and 256 values will be enough precision
-            density = cv2.imread(str(self.DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
+            density = cv2.imread(str(self.density_file), cv2.IMREAD_GRAYSCALE)
             density = (np.iinfo(np.uint8).max*((density - np.min(density))/np.ptp(density))).astype(np.uint8)
             density = cv2.resize(density, data.shape)
 

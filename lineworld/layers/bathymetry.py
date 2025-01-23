@@ -24,8 +24,6 @@ class Bathymetry(ElevationLayer):
                  config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-        self.config = {**self.config, **config.get("layer", {}).get("bathymetry", {})}
-
         metadata = MetaData()
 
         self.world_polygon_table = Table(

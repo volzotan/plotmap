@@ -52,25 +52,24 @@ class Labels(Layer):
     DATA_URL = ""
     DATA_SRID = Projection.WGS84
 
-    LAYER_NAME = "Labels"
-    DATA_DIR = Path("data", LAYER_NAME.lower())
-    LABELS_FILE = Path(DATA_DIR, "labels.json")
+    DEFAULT_LAYER_NAME = "Labels"
+    DEFAULT_LABELS_FILENAME = "labels.json"
 
     # simplification tolerance in WGS84 latlon, resolution: 1°=111.32km (equator worst case)
     LAT_LON_PRECISION = 0.01
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
 
     DEFAULT_EXCLUDE_BUFFER_DISTANCE = 2
-
     DEFAULT_FONT_SIZE = 12
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_id, db)
+        super().__init__(layer_id, db, config)
 
-        self.config = config.get("layer", {}).get("labels", {})
+        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.labels_file = Path(self.data_dir, self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME))
 
-        if not self.DATA_DIR.exists():
-            os.makedirs(self.DATA_DIR)
+        if not self.data_dir.exists():
+            os.makedirs(self.data_dir)
 
         metadata = MetaData()
 
@@ -96,8 +95,8 @@ class Labels(Layer):
         pass
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[LabelsLines]:
-        if not self.LABELS_FILE.exists():
-            logger.warning(f"labels file {self.LABELS_FILE} not found")
+        if not self.labels_file.exists():
+            logger.warning(f"labels file {self.labels_file} not found")
             return []
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
@@ -105,7 +104,7 @@ class Labels(Layer):
 
         labellines = []
 
-        with open(self.LABELS_FILE) as f:
+        with open(self.labels_file) as f:
             data = json.load(f)
 
             for label_data in data["labels"]:

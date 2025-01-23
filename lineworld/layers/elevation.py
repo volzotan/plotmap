@@ -79,14 +79,10 @@ class ElevationLayer(Layer):
     Projection Info: GEBCO data is WGS84 - Mercator (EPSG 4326)
     """
 
-    DATA_URL = "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/geotiff/"
+    DEFAULT_DATA_URL = "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/geotiff/"
     DATA_SRID = Projection.WGS84
 
-    LAYER_NAME = "Elevation"
-    DATA_DIR = Path("data", LAYER_NAME.lower())
-    TILES_DIR = Path(DATA_DIR, "tiles")
-    SCALED_DIR = Path(DATA_DIR, "scaled")
-    MOSAIC_FILE = Path(DATA_DIR, "gebco_mosaic.tif")
+    DEFAULT_LAYER_NAME = "Elevation"
 
     GEOTIFF_SCALING_FACTOR = 0.5
     # minimal area of polygons on a WGS84 geoid in m^2
@@ -102,16 +98,20 @@ class ElevationLayer(Layer):
                  layer_id: str,
                  db: engine.Engine,
                  config: dict[str, Any]) -> None:
-        super().__init__(layer_id, db)
+        super().__init__(layer_id, db, config)
 
-        self.config = config.get("layer", {}).get("elevation", {})
+        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
 
-        if not self.DATA_DIR.exists():
-            os.makedirs(self.DATA_DIR)
-        if not self.TILES_DIR.exists():
-            os.makedirs(self.TILES_DIR)
-        if not self.SCALED_DIR.exists():
-            os.makedirs(self.SCALED_DIR)
+        self.tiles_dir = Path(self.data_dir, "tiles")
+        self.scaled_dir = Path(self.data_dir, "scaled")
+        self.mosaic_file = Path(self.data_dir, "gebco_mosaic.tif")
+
+        if not self.data_dir.exists():
+            os.makedirs(self.data_dir)
+        if not self.tiles_dir.exists():
+            os.makedirs(self.tiles_dir)
+        if not self.scaled_dir.exists():
+            os.makedirs(self.scaled_dir)
 
     def extract(self) -> None:
         """
@@ -120,14 +120,18 @@ class ElevationLayer(Layer):
 
         logger.info("extracting elevation data from GeoTiffs")
 
+        data_url = self.config.get("data_url", self.DEFAULT_DATA_URL)
+
+        # TODO: Download and unpack geoTiff files from the network
         # Downscaling
-        dataset_files = [f for f in self.TILES_DIR.iterdir() if f.is_file() and f.suffix == ".tif"]
+
+        dataset_files = [f for f in self.tiles_dir.iterdir() if f.is_file() and f.suffix == ".tif"]
         if len(dataset_files) == 0:
             logger.warning("no GeoTiffs to transform")
 
         scaled_files = []
         for dataset_file in dataset_files:
-            scaled_path = Path(self.SCALED_DIR, dataset_file.name)
+            scaled_path = Path(self.scaled_dir, dataset_file.name)
             scaled_files.append(scaled_path)
 
             if scaled_path.exists():
@@ -137,20 +141,20 @@ class ElevationLayer(Layer):
             gebco_grid_to_polygon.downscale_and_write(dataset_file, scaled_path, self.GEOTIFF_SCALING_FACTOR)
 
         # Merging tiles into a mosaic
-        if not self.MOSAIC_FILE.exists():
+        if not self.mosaic_file.exists():
             logger.debug("merging mosaic tiles")
-            gebco_grid_to_polygon.merge_and_write(scaled_files, self.MOSAIC_FILE)
+            gebco_grid_to_polygon.merge_and_write(scaled_files, self.mosaic_file)
 
     def transform_to_world(self) -> list[ElevationWorldPolygon]:
         """
         Transform GEBCO geoTiff raster image data to shapely polygons on layers with fixed min-max elevations
         """
 
-        if not self.MOSAIC_FILE.exists():
-            raise Exception(f"Gebco mosaic GeoTiff {self.MOSAIC_FILE} not found")
+        if not self.mosaic_file.exists():
+            raise Exception(f"Gebco mosaic GeoTiff {self.mosaic_file} not found")
 
         if "elevation_anchors" not in self.config:
-            logger.warning(f"configuration \"elevation_anchors\" missing for layer {self.LAYER_NAME}, fallback to default values")
+            logger.warning(f"configuration \"elevation_anchors\" missing for layer {self.layer_id}, fallback to default values")
 
         polygons: list[ElevationWorldPolygon] = []
         layer_elevation_bounds = gebco_grid_to_polygon.get_elevation_bounds(
@@ -160,7 +164,7 @@ class ElevationLayer(Layer):
         logger.debug(
             f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}")
 
-        for dataset_file in [self.MOSAIC_FILE]:
+        for dataset_file in [self.mosaic_file]:
             logger.info(f"converting raster data to elevation contour polygons: {dataset_file})")
 
             converted_layers = gebco_grid_to_polygon.convert(

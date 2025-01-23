@@ -43,9 +43,7 @@ class Grid(Layer):
     DEFAULT_LONGITUDE_LINE_DIST = 20
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
-        super().__init__(layer_id, db)
-
-        self.config = config.get("layer", {}).get("grid", {})
+        super().__init__(layer_id, db, config)
 
     def extract(self) -> None:
         pass
@@ -189,8 +187,6 @@ class GridBathymetry(Grid):
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
-
-        self.config = config.get("layer", {}).get("grid", {})
         
         metadata = MetaData()
 
@@ -252,8 +248,6 @@ class GridLabels(Grid):
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
-
-        self.config = config.get("layer", {}).get("grid", {})
 
         metadata = MetaData()
 
