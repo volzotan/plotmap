@@ -1,11 +1,14 @@
 # basic config
 
+name = "LineWorldBasicConfig"
+
+debug = true
 projection = "VAN_DER_GRINTEN_I"
 wrapover = true
 
 # units in mm
 width = 2000
-height = 1200
+height = 1500
 
 offset_x = 0.0
 offset_y = 170
@@ -23,14 +26,25 @@ db_connection = "postgresql+psycopg://localhost:5432/lineworld"
 
 [layer.elevation]
 
-[layer.contour]
+[layer.Contour]
 elevation_anchors = [0, 500, 2000, 9000]
 num_elevation_lines = 24
 
-[layer.bathymetry]
+[layer.Bathymetry]
 elevation_anchors = [0, -11000]
 num_elevation_lines = 15
 
-[layer.bathymetryflowlines]
-px_per_mm = 10
-blur_angles_kernel_size = 20
+[layer.BathymetryFlowlines]
+layer_name = "BathymetryFlowlines"
+num_tiles = 4
+line_distance = [0.2, 2.0]
+blur_angles_kernel_size = 25
+blur_inclination_kernel_size = 10
+blur_density_kernel_size = 25
+
+[layer.Grid]
+latitude_line_dist = 20
+longitude_line_dist = 20
+bathymetry_exclude_buffer_distance = 0.8
+labels_exclude_buffer_distance = 2.0
+font_size = 5

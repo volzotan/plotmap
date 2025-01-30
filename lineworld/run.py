@@ -14,6 +14,7 @@ from layers import contour
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry
+from lineworld.util.export import convert_svg_to_png
 
 
 def run() -> None:
@@ -192,6 +193,10 @@ def run() -> None:
         svg.add(k, v) #, options=layer_styles.get(k.lower(), {}))
 
     svg.write()
+    try:
+        convert_svg_to_png(svg_filename, svg.dimensions[0] * 10)
+    except Exception as e:
+        logger.error(f"SVG to PNG conversion failed: {e}")
 
     logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")
 
