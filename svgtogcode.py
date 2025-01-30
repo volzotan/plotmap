@@ -11,7 +11,7 @@ import numpy as np
 from shapely import LineString, Point
 
 DEFAULT_INPUT_FILENAME = "world.svg"
-DEFAULT_MAX_LENGTH_SEGMENT = 15 # in m
+DEFAULT_MAX_LENGTH_SEGMENT = 30 # in m
 
 # FILTER_BY_LAYER = ["coastlines"]
 # FILTER_BY_LAYER = ["coastlines_hatching"]
@@ -33,7 +33,7 @@ PEN_LIFT_SPEED  = 2000
 COMP_TOLERANCE  = 0.9
 MIN_LINE_LENGTH = 0.75 # in mm
 
-PEN_UP_DISTANCE = 1
+PEN_UP_DISTANCE = 2
 CMD_MOVE        = "G1 X{0:.3f} Y{1:.3f}\n"
 CMD_PEN_UP      = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
 
@@ -44,6 +44,21 @@ OPTIMIZE_ORDER  = True
 #                        linewidth=150)
 
 np.set_printoptions(suppress=True)
+
+def process_count(e: Any, default_namespace: str) -> int:
+
+    if e.tag == default_namespace + "rect":
+        return 4
+
+    if e.tag == default_namespace + "line":
+        return 1
+
+    if e.tag == default_namespace + "path":
+        d = e.attrib["d"]
+        d = d[1:] # cut off the M
+        return len(d.split("L")) - 1
+
+    return 0
 
 def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, float]]:
     lines = []
@@ -218,12 +233,26 @@ if __name__ == "__main__":
                 print(f"skip layer {layer.attrib['id']}")
                 continue
 
-        print(f"process layer: {layer.attrib['id']}")
+        line_count = 0
+        for child in layer:
+            line_count += process_count(child, svg_default_namespace)
+
+        all_lines = np.zeros([line_count, 4], dtype=np.float64)
+        fill_index = 0
 
         for i, child in enumerate(layer):
             if i%100 == 0:
-                printProgressBar(i, len(layer))
-            all_lines = all_lines + process(child, svg_default_namespace)
+                printProgressBar(i, len(layer), prefix=f"process layer: {layer.attrib['id']:<25}")
+
+            lines = process(child, svg_default_namespace)
+
+            for line in lines:
+                all_lines[fill_index, :] = line
+                fill_index += 1
+
+        all_lines = all_lines.tolist()
+        print("")
+
 
     if args.limit > 0:
         limit = min(len(all_lines), args.limit)
@@ -237,7 +266,7 @@ if __name__ == "__main__":
         for i, line in enumerate(all_lines):
 
             if i%100 == 0:
-                printProgressBar(i, len(all_lines))
+                printProgressBar(i, len(all_lines), prefix="cropping")
 
             ls = LineString([line[0:2], line[2:4]])
             result = crop_region.intersection(ls)
@@ -266,6 +295,8 @@ if __name__ == "__main__":
 
                 case _:
                     print(f"cropping: unexpected shapely geometry: {type(result)}")
+
+        print("")
 
         all_lines = cropped_lines
 
@@ -339,7 +370,7 @@ if __name__ == "__main__":
 
             if i%100 == 0:
                 # print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
-                printProgressBar(len(ordered_lines), nplines.shape[0])
+                printProgressBar(len(ordered_lines), nplines.shape[0], prefix="optimize order")
 
             last = ordered_lines[-1]
             indices_done_mask[indices_done] = True
@@ -384,7 +415,7 @@ if __name__ == "__main__":
                 flip = nplines[distance_back_min, :]
                 ordered_lines.append(np.array([flip[2], flip[3], flip[0], flip[1]]))
 
-
+        print("")
         print("optimization done. time: {0:.2f}s".format((datetime.now()-timer).total_seconds()))
 
     else:
