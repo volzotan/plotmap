@@ -1,0 +1,63 @@
+# basic config
+
+name = "LineWorld1000x650"
+
+debug = true
+projection = "VAN_DER_GRINTEN_I"
+wrapover = true
+
+# units in mm
+width = 1000
+height = 650
+
+offset_x = 0.0
+offset_y = 60
+
+tolerance = 0.1
+
+crop = true
+crop_offset_x = 500
+crop_offset_y = 350
+crop_width = 1000
+crop_height = 500
+
+inkscape_command = "/Applications/Inkscape.app/Contents/MacOS/inkscape"
+
+[main]
+db_connection = "postgresql+psycopg://localhost:5432/lineworld"
+
+[layer.elevation]
+
+[layer.Contour]
+elevation_anchors = [0, 500, 2000, 9000]
+num_elevation_lines = 9
+
+[layer.Bathymetry]
+elevation_anchors = [0, -11000]
+num_elevation_lines = 15
+
+[layer.BathymetryFlowlines]
+layer_name = "BathymetryFlowlines"
+num_tiles = 4
+line_distance = [0.2, 2.0]
+blur_angles_kernel_size = 25
+blur_inclination_kernel_size = 10
+blur_density_kernel_size = 25
+
+[layer.Grid]
+latitude_line_dist = 20
+longitude_line_dist = 20
+font_size = 5
+
+[layer.GridBathymetry]
+exclude_buffer_distance = 0.4
+
+[layer.GridLabels]
+exclude_buffer_distance = 1.0
+
+[layer.CitiesLabels]
+font_size = 5
+
+[layer.Labels]
+font_size = 6
+exclude_buffer_distance = 1.0

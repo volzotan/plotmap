@@ -45,6 +45,11 @@ def _unpack_multigeometry[T](g: Geometry | list[Geometry] | np.ndarray, geometry
     return unpacked
 
 
+def crop_geometry(main: list[Geometry] | Geometry, tool: list[Geometry]) -> list[Geometry] | Geometry:
+    # TODO
+    pass
+
+
 def unpack_multipolygon(g: Geometry | list[Geometry] | np.ndarray) -> list[Polygon]:
     return _unpack_multigeometry(g, Polygon)
 

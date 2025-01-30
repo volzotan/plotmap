@@ -50,6 +50,8 @@ class FlowlineHatcherConfig():
     BLUR_DENSITY_MAP: bool = True
     BLUR_DENSITY_KERNEL_SIZE: int = 10
 
+    SCALE_ADJUSTMENT_VALUE: float = 0.3
+
     COLLISION_APPROXIMATE: bool = True
     VIZ_LINE_THICKNESS: int = 5
 
@@ -75,7 +77,10 @@ class FlowlineTilerPoly():
                 raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
 
         # Prepare a non-linear scale for the density calculations
-        scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
+        scale_adjustment_value = self.config.SCALE_ADJUSTMENT_VALUE
+        scale = scales.Scale(scales.quadratic_bezier, {
+            "p1": [0.0 + scale_adjustment_value, 0.0],
+            "p2": [1.0 - scale_adjustment_value, 1.0]})
         self.density_func = (scale.apply, np.min(self.elevation), np.max(self.elevation))
 
         if self.density is not None:
@@ -252,7 +257,10 @@ class FlowlineTiler():
                 raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
 
         # Prepare a non-linear scale for the density calculations
-        scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
+        scale_adjustment_value = self.config.SCALE_ADJUSTMENT_VALUE
+        scale = scales.Scale(scales.quadratic_bezier, {
+            "p1": [0.0 + scale_adjustment_value, 0.0],
+            "p2": [1.0 - scale_adjustment_value, 1.0]})
         self.density_func = (scale.apply, np.min(self.elevation), np.max(self.elevation))
 
         if self.density is not None:
