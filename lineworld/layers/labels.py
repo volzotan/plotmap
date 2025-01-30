@@ -67,6 +67,7 @@ class Labels(Layer):
 
         self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
         self.labels_file = Path(self.data_dir, self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME))
+        self.font_size = self.config.get("font_size", self.DEFAULT_FONT_SIZE)
 
         if not self.data_dir.exists():
             os.makedirs(self.data_dir)
@@ -83,7 +84,7 @@ class Labels(Layer):
 
         self.hfont = HersheyFonts()
         self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.config.get("font_size", self.DEFAULT_FONT_SIZE))
+        self.hfont.normalize_rendering(self.font_size)
 
     def extract(self) -> None:
         pass
@@ -111,16 +112,19 @@ class Labels(Layer):
                 pos = shapely.ops.transform(project_func, Point(reversed(label_data[0])))
                 pos = affine_transform(pos, mat)
 
-                lines = hershey_text_to_lines(self.hfont, label_data[1])
+                sub_labels = label_data[1].split("\n")
 
-                center_offset = shapely.envelope(lines).centroid
+                for i, sub_label in enumerate(sub_labels):
+                    lines = hershey_text_to_lines(self.hfont, sub_label)
 
-                mat_font = document_info.get_transformation_matrix_font(
-                    xoff=pos.x - center_offset.x,
-                    yoff=pos.y - center_offset.y
-                )
+                    center_offset = shapely.envelope(lines).centroid
 
-                labellines.append(LabelsLines(None, label_data[1], affine_transform(lines, mat_font)))
+                    mat_font = document_info.get_transformation_matrix_font(
+                        xoff=pos.x - center_offset.x,
+                        yoff=pos.y - center_offset.y + (self.font_size * 1.06) * i
+                    )
+
+                    labellines.append(LabelsLines(None, sub_label, affine_transform(lines, mat_font)))
 
         return labellines
 
