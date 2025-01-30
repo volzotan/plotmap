@@ -114,7 +114,7 @@ class Coastlines(Layer):
 
     def extract(self) -> None:
 
-        filename_zip = Path(self.data_dir, Path(self.DATA_URL).name)
+        filename_zip = Path(self.data_dir, Path(self.data_url).name)
 
         if not filename_zip.exists():
             logger.info(f"Downloading: {self.data_url}")

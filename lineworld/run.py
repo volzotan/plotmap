@@ -34,12 +34,12 @@ def run() -> None:
     engine = create_engine(config["main"]["db_connection"]) # , echo=True)
     document_info = maptools.DocumentInfo(config)
 
-    layer_grid_bathymetry = grid.GridBathymetry("Grid Bathymetry", engine, config)
+    layer_grid_bathymetry = grid.GridBathymetry("GridBathymetry", engine, config)
     layer_grid_labels = grid.GridLabels("GridLabels", engine, config)
 
-    layer_bathymetry = bflowlines.BathymetryFlowlines("Bathymetry", engine, config,
+    layer_bathymetry = bflowlines.BathymetryFlowlines("BathymetryFlowlines", engine, config,
                                                       tile_boundaries=layer_grid_bathymetry.get_polygons(document_info))
-    layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry2", engine, config)
+    layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry", engine, config)
     layer_contour = contour.Contour("Contour", engine, config)
 
     layer_coastlines = coastlines.Coastlines("Coastlines", engine, config)
@@ -50,7 +50,7 @@ def run() -> None:
     layer_labels = labels.Labels("Labels", engine, config)
 
     compute_layers = [
-        layer_bathymetry,
+        # layer_bathymetry,
         # layer_bathymetry2,
         # layer_contour,
         # layer_coastlines,
@@ -96,10 +96,10 @@ def run() -> None:
     visible_layers = [
         # layer_cities_labels,
         # layer_cities_circles,
-        # layer_grid_labels,
-        # layer_labels,
+        layer_grid_labels,
+        layer_labels,
         layer_coastlines,
-        # layer_contour,
+        layer_contour,
         layer_grid_bathymetry,
         layer_bathymetry,
         # layer_bathymetry2,
@@ -112,7 +112,11 @@ def run() -> None:
         draw, exclude = layer.out(exclude, document_info)
         draw_objects[layer.layer_id] = draw
 
-    svg = SvgWriter("test.svg", [document_info.width, document_info.height])
+    svg_filename = config.get("name", "output")
+    if not svg_filename.endswith(".svg"):
+        svg_filename += ".svg"
+
+    svg = SvgWriter(svg_filename, [document_info.width, document_info.height])
     svg.background_color = "white"
 
     # options_bathymetry = {
@@ -150,6 +154,8 @@ def run() -> None:
         "fill-opacity": "0.1"
     }
 
+    layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
+
     layer_styles[layer_contour.layer_id] = {
         "fill": "none",
         "stroke": "black",
@@ -171,7 +177,7 @@ def run() -> None:
     layer_styles[layer_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "1.0",
+        "stroke-width": "0.4",
     }
 
     layer_styles[layer_cities_labels.layer_id] = {

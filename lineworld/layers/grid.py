@@ -220,7 +220,7 @@ class GridBathymetry(Grid):
         exclusion_zones = add_to_exclusion_zones(
             drawing_geometries,
             exclusion_zones,
-            self.config.get("bathymetry_exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+            self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
             self.config.get("tolerance", 0.1)
         )
 
