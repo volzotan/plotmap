@@ -60,6 +60,7 @@ class HersheyFont():
                                 if not i == len(path) - 1:
                                     linestring_points.append([e.start.real, e.start.imag])
                                 else:
+                                    linestring_points.append([e.start.real, e.start.imag])
                                     linestring_points.append([e.end.real, e.end.imag])
                             else:
                                 logger.warning(f"unknown SVG path element: {e}")
