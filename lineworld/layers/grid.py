@@ -5,7 +5,6 @@ from typing import Any
 import geoalchemy2
 import numpy as np
 import shapely
-from HersheyFonts import HersheyFonts
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
@@ -20,7 +19,8 @@ from sqlalchemy import select
 from sqlalchemy import text
 
 from lineworld.util import geometrytools
-from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
+from lineworld.util.geometrytools import add_to_exclusion_zones
+from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
@@ -249,6 +249,8 @@ class GridLabels(Grid):
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
+        self.font_size = self.config.get("font_size", self.DEFAULT_FONT_SIZE)
+
         metadata = MetaData()
 
         self.map_lines_table = Table(
@@ -259,9 +261,7 @@ class GridLabels(Grid):
 
         metadata.create_all(self.db)
 
-        self.hfont = HersheyFonts()
-        self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.config.get("font_size", self.DEFAULT_FONT_SIZE))
+        self.font = HersheyFont()
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
 
@@ -287,7 +287,7 @@ class GridLabels(Grid):
             if line_label > +180:
                 line_label = line_label - 360
 
-            lines = hershey_text_to_lines(self.hfont, f"{line_label}")
+            lines = MultiLineString(self.font.lines_for_text(f"{line_label}", self.font_size))
 
             lon_line = LineString([[lon, -90], [lon, +90]])
             lon_line = shapely.segmentize(lon_line, self.LAT_LON_MIN_SEGMENT_LENGTH)
@@ -336,7 +336,7 @@ class GridLabels(Grid):
 
         for lat in lats:
 
-            lines = hershey_text_to_lines(self.hfont, f"{lat}")
+            lines = MultiLineString(self.font.lines_for_text(f"{lat}", self.font_size))
 
             min_lon = -180
             max_lon = 180

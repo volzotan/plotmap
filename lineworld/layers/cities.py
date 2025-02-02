@@ -7,7 +7,6 @@ import fiona
 import geoalchemy2
 import numpy as np
 import shapely
-from HersheyFonts import HersheyFonts
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
@@ -22,7 +21,8 @@ from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
+from lineworld.util.geometrytools import add_to_exclusion_zones
+from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
@@ -83,9 +83,7 @@ class Cities(Layer):
 
         metadata.create_all(self.db)
 
-        self.hfont = HersheyFonts()
-        self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.font_size)
+        self.font = HersheyFont()
 
     def extract(self) -> None:
         pass
@@ -136,11 +134,8 @@ class Cities(Layer):
         for i in range(0, len(city_name)):
             minx, _, _, maxy = city_label[i].bounds
             c = [minx, maxy]
-            text_lines = hershey_text_to_lines(self.hfont, city_name[i])
-            text_lines = shapely.affinity.scale(text_lines, xfact=1, yfact=-1, origin=Point(0, 0))
-            text_lines = shapely.affinity.translate(text_lines, xoff=c[0] + self.city_circle_radius - 0.75,
-                                                    yoff=c[1] + 0.4)
-
+            text_lines = MultiLineString(self.font.lines_for_text(city_name[i], self.font_size))
+            text_lines = shapely.affinity.translate(text_lines, xoff=c[0] + self.city_circle_radius - 0.75, yoff=c[1] + 0.4)
             lines.append(CitiesLines(None, city_pos[i].buffer(self.city_circle_radius).exterior, text_lines))
 
         return lines

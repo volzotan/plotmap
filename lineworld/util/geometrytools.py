@@ -1,6 +1,5 @@
 import numpy as np
 import shapely
-from HersheyFonts import HersheyFonts
 from loguru import logger
 from pyproj import Geod
 from shapely import Geometry
@@ -119,16 +118,6 @@ def process_polygons(
         logger.debug(f"{k:10} : {v:10}")
 
     return polys
-
-
-def hershey_text_to_lines(font: HersheyFonts, text: str) -> MultiLineString:
-    lines_raw = font.lines_for_text(text)
-    # lines_restructured = []
-    # for (x1, y1), (x2, y2) in lines_raw:
-    #     lines_restructured.append([[x1, y1], [x2, y2]])
-    # lines = MultiLineString(lines_restructured)
-
-    return MultiLineString([[[x1, y1], [x2, y2]] for (x1, y1), (x2, y2) in lines_raw])
 
 
 def add_to_exclusion_zones(drawing_geometries: list[Geometry],

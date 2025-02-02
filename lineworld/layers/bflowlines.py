@@ -27,7 +27,7 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling, tr
 import lineworld
 from experiments.hatching import flowlines, scales
 from experiments.hatching.flowlines import FlowlineTiler, FlowlineTilerPoly
-from lineworld.util.geometrytools import hershey_text_to_lines, add_to_exclusion_zones
+from lineworld.util.geometrytools import add_to_exclusion_zones
 
 @dataclass
 class BathymetryFlowlinesMapLines():

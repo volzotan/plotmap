@@ -9,7 +9,6 @@ import fiona
 import geoalchemy2
 import numpy as np
 import shapely
-from HersheyFonts import HersheyFonts
 from core.maptools import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
@@ -27,8 +26,8 @@ from sqlalchemy import text
 
 from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
 from lineworld.util import downloader
-from lineworld.util.geometrytools import process_polygons, unpack_multipolygon, hershey_text_to_lines, \
-    add_to_exclusion_zones
+from lineworld.util.geometrytools import process_polygons, unpack_multipolygon, add_to_exclusion_zones
+from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
@@ -82,9 +81,8 @@ class Labels(Layer):
 
         metadata.create_all(self.db)
 
-        self.hfont = HersheyFonts()
-        self.hfont.load_default_font("futural")
-        self.hfont.normalize_rendering(self.font_size)
+        # self.font = HersheyFont(font_file="fonts/HersheySerifMed.svg")
+        self.font = HersheyFont()
 
     def extract(self) -> None:
         pass
@@ -109,22 +107,25 @@ class Labels(Layer):
             data = json.load(f)
 
             for label_data in data["labels"]:
-                pos = shapely.ops.transform(project_func, Point(reversed(label_data[0])))
-                pos = affine_transform(pos, mat)
+
+                path = LineString([[label_data[0][1], label_data[0][0]], [label_data[0][1] + 30, label_data[0][0]]]).segmentize(0.1)
+                path = shapely.ops.transform(project_func, path)
+                path = affine_transform(path, mat)
 
                 sub_labels = label_data[1].split("\n")
 
                 for i, sub_label in enumerate(sub_labels):
-                    lines = hershey_text_to_lines(self.hfont, sub_label)
+                    lines = MultiLineString(self.font.lines_for_text(sub_label, self.font_size, path=path))
 
                     center_offset = shapely.envelope(lines).centroid
+                    minx, miny, maxx, maxy = lines.bounds
 
-                    mat_font = document_info.get_transformation_matrix_font(
-                        xoff=pos.x - center_offset.x,
-                        yoff=pos.y - center_offset.y + (self.font_size * 1.06) * i
+                    lines = shapely.affinity.translate(lines,
+                        xoff=-(center_offset.x-minx),
+                        yoff=+(self.font_size * 1.08 * i)
                     )
 
-                    labellines.append(LabelsLines(None, sub_label, affine_transform(lines, mat_font)))
+                    labellines.append(LabelsLines(None, sub_label, lines))
 
         return labellines
 
@@ -162,9 +163,9 @@ class Labels(Layer):
             drawing_geometries = viewport_lines.tolist()
 
         # and add buffered lines to exclusion_zones
-        exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones,
-            self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
-            self.config.get("tolerance", 0.1))
+        # exclusion_zones = add_to_exclusion_zones(
+        #     drawing_geometries, exclusion_zones,
+        #     self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+        #     self.config.get("tolerance", 0.1))
 
         return (drawing_geometries, exclusion_zones)
