@@ -27,15 +27,26 @@ OFFSET          = [0, 0] #[-1425, -000]
 ROTATE_90       = False
 
 TRAVEL_SPEED    = 6000
-WRITE_SPEED     = 5000
-PEN_LIFT_SPEED  = 2000
+WRITE_SPEED     = 4000
+PEN_LIFT_SPEED  = 3000
+PEN_DIP_SPEED   = 500
+
+PEN_UP_DISTANCE         = 1.5
+PEN_DIP_UP_DISTANCE     = 7.0
+PEN_DIP_DOWN_DISTANCE   = 0.5
 
 COMP_TOLERANCE  = 0.9
 MIN_LINE_LENGTH = 0.75 # in mm
 
-PEN_UP_DISTANCE = 2
-CMD_MOVE        = "G1 X{0:.3f} Y{1:.3f}\n"
-CMD_PEN_UP      = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
+WAIT_INIT       = 5000
+
+DIP_LOCATION    = [0, -20]
+DIP_DISTANCE    = 120
+
+CMD_MOVE            = "G1 X{0:.3f} Y{1:.3f}\n"
+CMD_PEN_UP          = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
+CMD_PEN_DIP_UP      = "G1 Z{} F{}\n".format(PEN_DIP_UP_DISTANCE, PEN_LIFT_SPEED)
+CMD_PEN_DIP_DOWN    = "G1 Z{} F{}\n".format(PEN_DIP_DOWN_DISTANCE, PEN_DIP_SPEED)
 
 OPTIMIZE_ORDER  = True
 
@@ -88,7 +99,7 @@ def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, f
         l = []
 
         for s in segments:
-            pairs = s.split(" ")
+            pairs = s.strip().split(" ")
             l.append([float(pairs[0]), float(pairs[1])])
 
         for i in range(1, len(l)):
@@ -181,6 +192,13 @@ if __name__ == "__main__":
         help="process only the first n lines"
     )
 
+    parser.add_argument(
+        "--dip-mode",
+        default=False,
+        action="store_true",
+        help="enable dip pen mode"
+    )
+
     args = parser.parse_args()
 
     crop_region = None
@@ -242,7 +260,7 @@ if __name__ == "__main__":
 
         for i, child in enumerate(layer):
             if i%100 == 0:
-                printProgressBar(i, len(layer), prefix=f"process layer: {layer.attrib['id']:<25}")
+                printProgressBar(i, len(layer), prefix=f"process layer: {layer.attrib.get("id", "UNNAMED_LAYER"):<25}")
 
             lines = process(child, svg_default_namespace)
 
@@ -532,6 +550,7 @@ if __name__ == "__main__":
     count_pen_down      = 0
     count_draw_moves    = 0
     count_travel_moves  = 0
+    count_dip_moves     = 0
 
     state_pen_up = True
 
@@ -540,16 +559,18 @@ if __name__ == "__main__":
         segment = segments[s]
         filename = output_filename + f"_{s+1}of{len(segments)}.nc"
 
+        distance_travelled = 0
+
         with open(filename, "w") as out:
             out.write("G90\n")                          # absolute positioning
             out.write("G21\n")                          # Set Units to Millimeters
             out.write(CMD_PEN_UP)                       # move pen up
+            # out.write(f"G4 P{WAIT_INIT}\n")              # wait before making the first move
             out.write(f"G1 F{TRAVEL_SPEED}\n")          # Set feedrate to TRAVEL_SPEED mm/min
             state_pen_up = True
             out.write("\n")
 
             count_pen_up += 1
-
             number_lines = len(segment)
 
             for i in range(0, number_lines):
@@ -558,27 +579,26 @@ if __name__ == "__main__":
                 if (i + 1) < number_lines:
                     line_next = segment[i+1]
 
+                line_start = [line[0]+OFFSET[0], line[1]+OFFSET[1]]
                 if ROTATE_90:
-                    out.write(CMD_MOVE.format(line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + size[0]))
-                else:
-                    out.write(CMD_MOVE.format(line[0]+OFFSET[0], line[1]+OFFSET[1]))
+                    line_start = [line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + size[0]]
+
+                out.write(CMD_MOVE.format(*line_start))
 
                 # pen down
                 if (state_pen_up):
+                    count_travel_moves += 1
 
                     out.write(f"G1 Z0 F{PEN_LIFT_SPEED}\n")
                     out.write(f"G1 F{WRITE_SPEED}\n")
                     state_pen_up = False
-
-                    count_travel_moves += 1
                     count_pen_down += 1
-                else:
-                    count_draw_moves += 1
 
+                line_end = line[2]+OFFSET[0], line[3]+OFFSET[1]
                 if ROTATE_90:
-                    out.write(CMD_MOVE.format(line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + size[0]))
-                else:
-                    out.write(CMD_MOVE.format(line[2]+OFFSET[0], line[3]+OFFSET[1]))
+                    line_end = line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + size[0]
+
+                out.write(CMD_MOVE.format(*line_end))
 
                 count_draw_moves += 1
 
@@ -592,8 +612,31 @@ if __name__ == "__main__":
                     out.write(f"G1 F{TRAVEL_SPEED}\n")
                     out.write("\n")
                     state_pen_up = True
-
                     count_pen_up += 1
+
+                # dip pen calculations
+
+                distance_travelled += math.sqrt(
+                    (line_end[0] - line_start[0])**2 +
+                    (line_end[1] - line_start[1])**2
+                )
+
+                if args.dip_mode and distance_travelled > DIP_DISTANCE:
+                    distance_travelled = 0
+
+                    out.write(CMD_PEN_DIP_UP)
+                    state_pen_up = True
+                    count_pen_up += 1
+
+                    out.write(f"G1 F{TRAVEL_SPEED}\n")
+                    out.write(CMD_MOVE.format(*DIP_LOCATION))
+
+                    out.write(CMD_PEN_DIP_DOWN)
+                    out.write(CMD_PEN_DIP_UP)
+
+                    count_dip_moves += 1
+
+                    out.write(f"G1 F{TRAVEL_SPEED}\n")
 
             out.write(CMD_PEN_UP)
             out.write(f"G1 F{TRAVEL_SPEED}\n")
@@ -608,8 +651,11 @@ if __name__ == "__main__":
         print(f"write segment {s+1}/{len(segments)}: {filename}")
 
 
-    print(f"count_pen_up:        {count_pen_up}")
-    print(f"count_pen_down:      {count_pen_down}")
-    print(f"count_draw_moves:    {count_draw_moves}")
-    print(f"count_travel_moves:  {count_travel_moves}")
-    print(f"ratio draw/travel:   {float(count_draw_moves)/float(count_travel_moves):6.3f}")
+    print(f"count_pen_up:        {count_pen_up:>5}")
+    print(f"count_pen_down:      {count_pen_down:>5}")
+    print(f"count_draw_moves:    {count_draw_moves:>5}")
+    print(f"count_travel_moves:  {count_travel_moves:>5}")
+    print(f"ratio draw/travel:   {float(count_draw_moves)/float(count_travel_moves):>5.3f}")
+
+    if args.dip_mode:
+        print(f"count dip:           {count_pen_up:>5}")
