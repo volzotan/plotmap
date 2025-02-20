@@ -105,7 +105,7 @@ def run() -> None:
         # layer_bathymetry2,
     ]
 
-    exclude = MultiPolygon()
+    exclude = []
     draw_objects = {}
 
     for layer in visible_layers:

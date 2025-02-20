@@ -175,8 +175,9 @@ class Grid(Layer):
     def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> None:
         pass
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         raise NotImplementedError("Must override method")
 
 
@@ -202,11 +203,12 @@ class GridBathymetry(Grid):
         return self._get_gridlines(
             document_info,
             self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
-            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST)
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST),
         )
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
@@ -395,8 +397,9 @@ class GridLabels(Grid):
         # return gridlines + labels
         return labels
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
@@ -408,13 +411,16 @@ class GridLabels(Grid):
 
         # remove extrusion zones
         drawing_geometries_cut = []
+        stencil = shapely.unary_union(exclusion_zones)
         for g in drawing_geometries:
-            drawing_geometries_cut.append(shapely.difference(g, exclusion_zones))
+            drawing_geometries_cut.append(shapely.difference(g, stencil))
 
         # extend extrusion zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones,
+            drawing_geometries,
+            exclusion_zones,
             self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
-            self.config.get("tolerance", 0.1))
+            self.config.get("tolerance_exclusion_zones", 0.5),
+        )
 
         return (drawing_geometries_cut, exclusion_zones)

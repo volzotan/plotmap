@@ -155,13 +155,17 @@ class Cities(Layer):
             conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
             conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
-    def _out(self, column_name: str, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def _out(
+        self,
+        column_name: str,
+        exclusion_zones: list[Polygon],
+        document_info: DocumentInfo,
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
 
-        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
+        stencil = shapely.difference(document_info.get_viewport(), shapely.unary_union(exclusion_zones))
 
         drawing_geometries = []
         with self.db.begin() as conn:
@@ -174,26 +178,30 @@ class Cities(Layer):
 
         # and add buffered lines to exclusion_zones
         exclusion_zones = add_to_exclusion_zones(
-            drawing_geometries, exclusion_zones, self.exclude_buffer_distance, self.config.get("tolerance", 0.1))
+            drawing_geometries,
+            exclusion_zones,
+            self.exclude_buffer_distance,
+            self.config.get("tolerance_exclusion_zones", 0.5),
+        )
 
         return (drawing_geometries, exclusion_zones)
 
 
 class CitiesLabels(Cities):
-
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], MultiPolygon]:
         return self._out("labellines", exclusion_zones, document_info)
 
 
 class CitiesCircles(Cities):
-
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], MultiPolygon]:
         return self._out("circlelines", exclusion_zones, document_info)

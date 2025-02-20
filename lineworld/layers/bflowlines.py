@@ -195,8 +195,9 @@ class BathymetryFlowlines(Layer):
             conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
             conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
@@ -207,12 +208,17 @@ class BathymetryFlowlines(Layer):
             drawing_geometries = [to_shape(row.lines) for row in result]
 
         # cut extrusion_zones into drawing_geometries
-
+        # Note: using a STRtree here instead of unary_union() and difference() is a 6x speedup
         drawing_geometries_cut = []
-        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
+        tree = STRtree(exclusion_zones)
         for g in drawing_geometries:
-            drawing_geometries_cut.append(shapely.intersection(g, stencil))
+            g_processed = g
+            for i in tree.query(g):
+                g_processed = shapely.difference(g_processed,  exclusion_zones[i])
+                if g_processed.is_empty:
+                    break
+            else:
+                drawing_geometries_cut.append(g_processed)
 
         # and do not add anything to exclusion_zones
-
         return (drawing_geometries_cut, exclusion_zones)

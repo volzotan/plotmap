@@ -299,13 +299,14 @@ class Coastlines(Layer):
             case _:
                 raise Exception(f"unknown geometry: {geometries[0]}")
 
-    def out(self, exclusion_zones: MultiPolygon, document_info: DocumentInfo) -> tuple[
-        list[shapely.Geometry], MultiPolygon]:
+    def out(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
 
-        stencil = shapely.difference(document_info.get_viewport(), exclusion_zones)
+        stencil = shapely.difference(document_info.get_viewport(), shapely.unary_union(exclusion_zones))
 
         drawing_geometries = []
         with self.db.begin() as conn:
