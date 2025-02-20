@@ -97,7 +97,6 @@ def test_convert_poly_with_multiple_holes(poly_with_multiple_holes: np.ndarray, 
     assert len(results[0].interiors) == 3
 
 
-
 @pytest.fixture
 def poly_with_multiple_layers() -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
@@ -112,9 +111,9 @@ def poly_with_multiple_layers() -> np.ndarray:
 def approx_90(actual_value: float, expected_value: float) -> bool:
     return abs((actual_value / expected_value)) - 1 < 0.1
 
+
 @pytest.mark.parametrize("allow_overlap", [True, False])
 def test_convert_poly_with_multiple_layers(poly_with_multiple_layers: np.ndarray, allow_overlap: bool) -> None:
-
     mask = np.zeros_like(poly_with_multiple_layers, dtype=np.uint8)
 
     results0 = gebco_grid_to_polygon._extract_polygons(poly_with_multiple_layers, 50, 125, allow_overlap)
@@ -132,4 +131,3 @@ def test_convert_poly_with_multiple_layers(poly_with_multiple_layers: np.ndarray
         assert approx_90(results1[0].area, 600**2 - 400**2)
         assert approx_90(results2[0].area, 400**2 - 200**2)
         assert approx_90(results3[0].area, 200**2)
-

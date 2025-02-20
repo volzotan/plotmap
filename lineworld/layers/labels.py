@@ -1,53 +1,43 @@
 import json
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import fiona
 import geoalchemy2
 import numpy as np
 import shapely
 from core.maptools import DocumentInfo, Projection
-from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from loguru import logger
-from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString, Point
-from shapely.affinity import affine_transform, translate
-from shapely.geometry import shape
+from shapely import Polygon, MultiLineString, LineString
+from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
-from sqlalchemy import Table, Column, String, Integer, ForeignKey
+from sqlalchemy import Table, Column, String, Integer
 from sqlalchemy import engine
 from sqlalchemy import insert
 from sqlalchemy import select
 from sqlalchemy import text
 
-from lineworld.core.hatching import HatchingDirection, HatchingOptions, create_hatching
-from lineworld.util import downloader
-from lineworld.util.geometrytools import process_polygons, unpack_multipolygon, add_to_exclusion_zones
+from lineworld.util.geometrytools import add_to_exclusion_zones
 from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
-class LabelsLines():
+class LabelsLines:
     id: int | None
     text: str
     lines: MultiLineString
 
     def __repr__(self) -> str:
-        return (
-            f"LabelsLines [{self.id}]: {self.text}")
+        return f"LabelsLines [{self.id}]: {self.text}"
 
     def todict(self) -> dict[str, int | float | str | None]:
-        return {
-            "text": self.text,
-            "lines": str(from_shape(self.lines))
-        }
+        return {"text": self.text, "lines": str(from_shape(self.lines))}
+
 
 class Labels(Layer):
-
     DATA_URL = ""
     DATA_SRID = Projection.WGS84
 
@@ -64,8 +54,14 @@ class Labels(Layer):
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
-        self.labels_file = Path(self.data_dir, self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME))
+        self.data_dir = Path(
+            Layer.DATA_DIR_NAME,
+            self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower(),
+        )
+        self.labels_file = Path(
+            self.data_dir,
+            self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME),
+        )
         self.font_size = self.config.get("font_size", self.DEFAULT_FONT_SIZE)
 
         if not self.data_dir.exists():
@@ -73,10 +69,12 @@ class Labels(Layer):
 
         metadata = MetaData()
 
-        self.map_lines_table = Table("labels_map_lines", metadata,
+        self.map_lines_table = Table(
+            "labels_map_lines",
+            metadata,
             Column("id", Integer, primary_key=True),
             Column("text", String, nullable=False),
-            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
+            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
         )
 
         metadata.create_all(self.db)
@@ -107,8 +105,12 @@ class Labels(Layer):
             data = json.load(f)
 
             for label_data in data["labels"]:
-
-                path = LineString([[label_data[0][1], label_data[0][0]], [label_data[0][1] + 30, label_data[0][0]]]).segmentize(0.1)
+                path = LineString(
+                    [
+                        [label_data[0][1], label_data[0][0]],
+                        [label_data[0][1] + 50, label_data[0][0]],
+                    ]
+                ).segmentize(0.1)
                 path = shapely.ops.transform(project_func, path)
                 path = affine_transform(path, mat)
 
@@ -120,9 +122,10 @@ class Labels(Layer):
                     center_offset = shapely.envelope(lines).centroid
                     minx, miny, maxx, maxy = lines.bounds
 
-                    lines = shapely.affinity.translate(lines,
-                        xoff=-(center_offset.x-minx),
-                        yoff=+(self.font_size * 1.08 * i)
+                    lines = shapely.affinity.translate(
+                        lines,
+                        xoff=-(center_offset.x - minx),
+                        yoff=+(self.font_size * 1.08 * i),
                     )
 
                     labellines.append(LabelsLines(None, sub_label, lines))
@@ -130,7 +133,6 @@ class Labels(Layer):
         return labellines
 
     def load(self, geometries: list[LabelsLines]) -> None:
-
         if geometries is None:
             return
 
@@ -163,9 +165,11 @@ class Labels(Layer):
             drawing_geometries = viewport_lines.tolist()
 
         # and add buffered lines to exclusion_zones
-        # exclusion_zones = add_to_exclusion_zones(
-        #     drawing_geometries, exclusion_zones,
-        #     self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
-        #     self.config.get("tolerance", 0.1))
+        exclusion_zones = add_to_exclusion_zones(
+            drawing_geometries,
+            exclusion_zones,
+            self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
+            self.config.get("tolerance_exclusion_zones", 0.5),
+        )
 
         return (drawing_geometries, exclusion_zones)

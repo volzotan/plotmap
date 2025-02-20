@@ -21,7 +21,7 @@ from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
 
 @dataclass
-class ElevationWorldPolygon():
+class ElevationWorldPolygon:
     id: int | None
     elevation_level: int
     elevation_min: float
@@ -31,37 +31,35 @@ class ElevationWorldPolygon():
     # bbox: Polygon | None = None
 
     def __repr__(self) -> str:
-        return (
-            f"WorldPolygon [{self.id}] elevation: {self.elevation_level} | {self.elevation_min:7.2f} - {self.elevation_max:7.2f}")
+        return f"WorldPolygon [{self.id}] elevation: {self.elevation_level} | {self.elevation_min:7.2f} - {self.elevation_max:7.2f}"
 
     def todict(self) -> dict[str, int | float | str | WKBElement | None]:
         return {
             "elevation_level": self.elevation_level,
             "elevation_min": self.elevation_min,
             "elevation_max": self.elevation_max,
-            "polygon": from_shape(self.polygon)
+            "polygon": from_shape(self.polygon),
         }
 
 
 @dataclass
-class ElevationMapPolygon():
+class ElevationMapPolygon:
     id: int | None
     world_polygon_id: int | None
     polygon: Polygon
 
     def __repr__(self) -> str:
-        return (
-            f"MapPolygon [{self.id}]")
+        return f"MapPolygon [{self.id}]"
 
     def todict(self) -> dict[str, int | float | str | None]:
         return {
             "world_polygon_id": self.world_polygon_id,
-            "polygon": str(from_shape(self.polygon))  # Shapely geometry to WKB
+            "polygon": str(from_shape(self.polygon)),  # Shapely geometry to WKB
         }
 
 
 @dataclass
-class ElevationMapLines():
+class ElevationMapLines:
     id: int | None
     map_polygon_id: int | None
     lines: MultiLineString
@@ -69,7 +67,7 @@ class ElevationMapLines():
     def todict(self) -> dict[str, int | float | str | None]:
         return {
             "map_polygon_id": self.map_polygon_id,
-            "lines": str(from_shape(self.lines))
+            "lines": str(from_shape(self.lines)),
         }
 
 
@@ -94,13 +92,13 @@ class ElevationLayer(Layer):
     LAT_LON_MIN_SEGMENT_LENGTH = 0.1
     WRAPOVER_LONGITUDE_EXTENSION = 60
 
-    def __init__(self,
-                 layer_id: str,
-                 db: engine.Engine,
-                 config: dict[str, Any]) -> None:
+    def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.data_dir = Path(
+            Layer.DATA_DIR_NAME,
+            self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower(),
+        )
 
         self.tiles_dir = Path(self.data_dir, "tiles")
         self.scaled_dir = Path(self.data_dir, "scaled")
@@ -154,24 +152,23 @@ class ElevationLayer(Layer):
             raise Exception(f"Gebco mosaic GeoTiff {self.mosaic_file} not found")
 
         if "elevation_anchors" not in self.config:
-            logger.warning(f"configuration \"elevation_anchors\" missing for layer {self.layer_id}, fallback to default values")
+            logger.warning(
+                f'configuration "elevation_anchors" missing for layer {self.layer_id}, fallback to default values'
+            )
 
         polygons: list[ElevationWorldPolygon] = []
         layer_elevation_bounds = gebco_grid_to_polygon.get_elevation_bounds(
             self.config.get("elevation_anchors", [0, 10000]),
-            self.config.get("num_elevation_lines", 10)
+            self.config.get("num_elevation_lines", 10),
         )
         logger.debug(
-            f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}")
+            f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}"
+        )
 
         for dataset_file in [self.mosaic_file]:
             logger.info(f"converting raster data to elevation contour polygons: {dataset_file})")
 
-            converted_layers = gebco_grid_to_polygon.convert(
-                dataset_file,
-                layer_elevation_bounds,
-                allow_overlap=True
-            )
+            converted_layers = gebco_grid_to_polygon.convert(dataset_file, layer_elevation_bounds, allow_overlap=True)
 
             for layer_index in range(len(converted_layers)):
                 polys = process_polygons(
@@ -180,7 +177,7 @@ class ElevationLayer(Layer):
                     # min_area_wgs84=self.FILTER_POLYGON_MIN_AREA_WGS84, # warning, may incorrectly filter very large/complex polygons
                     check_empty=True,
                     check_valid=True,
-                    unpack=True
+                    unpack=True,
                 )
 
                 polygons += [
@@ -189,28 +186,30 @@ class ElevationLayer(Layer):
                         layer_index,
                         layer_elevation_bounds[layer_index][0],
                         layer_elevation_bounds[layer_index][1],
-                        polys[i]
-                    ) for i in range(polys.shape[0])
+                        polys[i],
+                    )
+                    for i in range(polys.shape[0])
                 ]
 
         return polygons
 
     def transform_to_map(self, document_info: DocumentInfo, allow_overlap: bool = False) -> list[ElevationMapPolygon]:
-
-        with (self.db.begin() as conn):
-
+        with self.db.begin() as conn:
             params = {
                 "srid": document_info.projection.value[1],
-                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
+                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84,
             }
 
-            result_center = conn.execute(text(f"""
+            result_center = conn.execute(
+                text(f"""
                 SELECT  id,
                         elevation_level,
                         polygon AS poly
                 FROM {self.world_polygon_table.fullname}
                 WHERE ST_Area(polygon) >= :min_area
-            """), params)
+            """),
+                params,
+            )
 
             results = result_center.all()
 
@@ -230,15 +229,18 @@ class ElevationLayer(Layer):
 
                 result_right = conn.execute(
                     select_slice,
-                    {**params, "viewport":
-                        to_wkt(shapely.box(-180, 85, -180 + self.WRAPOVER_LONGITUDE_EXTENSION, -85))
-                     }
+                    {
+                        **params,
+                        "viewport": to_wkt(shapely.box(-180, 85, -180 + self.WRAPOVER_LONGITUDE_EXTENSION, -85)),
+                    },
                 ).all()
 
                 result_left = conn.execute(
                     select_slice,
-                    {**params, "viewport":
-                        to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85))}
+                    {
+                        **params,
+                        "viewport": to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85)),
+                    },
                 ).all()
 
                 polygons_right = [translate(to_shape(WKBElement(x.poly)), xoff=360) for x in result_right]
@@ -266,7 +268,7 @@ class ElevationLayer(Layer):
             polys = process_polygons(
                 polys,
                 simplify_precision=self.config.get("tolerance", 0.1),
-                check_valid=True
+                check_valid=True,
             )
 
             layers: dict[int, list[ElevationMapPolygon]] = {}
@@ -293,16 +295,13 @@ class ElevationLayer(Layer):
                 return self._cut_layers(layers)
 
     def _cut_layers(self, layers: dict[int, list[ElevationMapPolygon]]) -> list[ElevationMapPolygon]:
-
         num_layers = max(layers.keys()) + 1
 
         result_list = []
 
         cutting_polygon = MultiPolygon()
         for i in reversed(range(num_layers)):
-
-            current_layer_polygon = shapely.unary_union(
-                np.array([p.polygon for p in layers[i]], dtype=Polygon))
+            current_layer_polygon = shapely.unary_union(np.array([p.polygon for p in layers[i]], dtype=Polygon))
 
             current_layer_polygon.buffer(0.1)
 
@@ -322,21 +321,18 @@ class ElevationLayer(Layer):
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[ElevationMapLines]:
         with self.db.begin() as conn:
-
             # for some reason it's faster to not use WHERE NOT ST_IsEmpty(poly) in the SQL command
 
-            result = conn.execute(text(f"""
+            result = conn.execute(
+                text(f"""
                 SELECT  mp.id, wp.elevation_level, mp.polygon AS poly, ST_Envelope(mp.polygon) AS bbox
                 FROM    {self.map_polygon_table} AS mp JOIN 
                         {self.world_polygon_table} AS wp ON mp.world_polygon_id = wp.id
-                """))
+                """)
+            )
 
             results = result.all()
-            stat: dict[str, int] = {
-                "invalid": 0,
-                "empty": 0,
-                "small": 0
-            }
+            stat: dict[str, int] = {"invalid": 0, "empty": 0, "small": 0}
 
             polys = np.array([to_shape(WKBElement(x.poly)) for x in results], dtype=Polygon)
             bboxes = [to_shape(WKBElement(x.bbox)) for x in results]
@@ -346,7 +342,6 @@ class ElevationLayer(Layer):
             processed_elevationPolygonLines = []
             for i in range(polys.shape[0]):
                 for mline in self._style(polys[i], results[i].elevation_level, document_info, bbox=bboxes[i]):
-
                     if mline.is_empty:
                         continue
 
@@ -363,7 +358,6 @@ class ElevationLayer(Layer):
 
         return processed_elevationPolygonLines
 
-
     def load(self, geometries: list[Any]) -> None:
         if geometries is None:
             return
@@ -375,11 +369,13 @@ class ElevationLayer(Layer):
             logger.info(f"loading geometries: {len(geometries)}")
 
         match geometries[0]:
-
             case ElevationWorldPolygon():
                 with self.db.begin() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+                    conn.execute(
+                        insert(self.world_polygon_table),
+                        [g.todict() for g in geometries],
+                    )
 
             case ElevationMapPolygon():
                 with self.db.begin() as conn:

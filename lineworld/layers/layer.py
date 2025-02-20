@@ -3,8 +3,8 @@ from typing import Any
 from sqlalchemy import engine
 from loguru import logger
 
-class Layer():
 
+class Layer:
     DATA_DIR_NAME = "data"
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]):

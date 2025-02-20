@@ -7,6 +7,7 @@ import pyproj
 import shapely
 from shapely.geometry import Polygon
 
+
 class Projection(Enum):
     WGS84 = "EPSG", 4326
     WEB_MERCATOR = "EPSG", 3857
@@ -15,13 +16,12 @@ class Projection(Enum):
 
 
 @dataclass
-class Pen():
+class Pen:
     color: list[int]
     stroke_size: float
 
 
-class DocumentInfo():
-
+class DocumentInfo:
     EQUATOR = 40075016.68557849
 
     def __init__(self, config: dict[str, Any]):
@@ -43,8 +43,8 @@ class DocumentInfo():
         b = 0
         d = 0
         e = 1 / self.EQUATOR * self.width * -1  # vertical flip
-        xoff = self.width / 2. + self.offset_x
-        yoff = self.height / 2. + self.offset_y
+        xoff = self.width / 2.0 + self.offset_x
+        yoff = self.height / 2.0 + self.offset_y
         return [a, b, d, e, xoff, yoff]
 
     def get_transformation_matrix_raster_to_map(self, raster_width: int, raster_height: int) -> list[float]:
@@ -57,7 +57,7 @@ class DocumentInfo():
         xoff = self.offset_x
 
         yoff = self.offset_y
-        yoff = -(self.width-self.height)/2 + self.offset_y
+        yoff = -(self.width - self.height) / 2 + self.offset_y
 
         return [a, b, d, e, xoff, yoff]
 
@@ -65,18 +65,28 @@ class DocumentInfo():
         a, b, d, e, xoff, yoff = self.get_transformation_matrix_raster_to_map(raster_width, raster_height)
         mat = np.matrix([[a, b, xoff], [d, e, yoff], [0, 0, 1]])
         mat_inv = np.linalg.inv(mat)
-        return [float(e) for e in [mat_inv[0, 0], mat_inv[0, 1], mat_inv[1, 0], mat_inv[1, 1], mat_inv[0, 2], mat_inv[1, 2]]]
+        return [
+            float(e)
+            for e in [
+                mat_inv[0, 0],
+                mat_inv[0, 1],
+                mat_inv[1, 0],
+                mat_inv[1, 1],
+                mat_inv[0, 2],
+                mat_inv[1, 2],
+            ]
+        ]
 
     def get_transformation_matrix_font(self, xoff: float, yoff: float) -> list[float]:
         a = 1
         b = 0
         d = 0
-        e = -1
+        e = 1
         return [a, b, d, e, xoff, yoff]
 
     def get_viewport(self) -> Polygon:
         if self.config.get("debug", False):
-            return shapely.box(-self.width, -self.height, self.width*2, self.height*2)
+            return shapely.box(-self.width, -self.height, self.width * 2, self.height * 2)
         else:
             return shapely.box(0, 0, self.width, self.height)
 

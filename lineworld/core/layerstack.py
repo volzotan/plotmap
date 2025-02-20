@@ -1,8 +1,7 @@
 from lineworld.layers.layer import Layer
 
 
-class LayerStack():
-
+class LayerStack:
     stack: dict[str, Layer] = {}
 
     def __init__(self, layers: list[Layer] = []):

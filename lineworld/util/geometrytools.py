@@ -3,7 +3,13 @@ import shapely
 from loguru import logger
 from pyproj import Geod
 from shapely import Geometry
-from shapely.geometry import GeometryCollection, Polygon, MultiPolygon, LineString, MultiLineString
+from shapely.geometry import (
+    GeometryCollection,
+    Polygon,
+    MultiPolygon,
+    LineString,
+    MultiLineString,
+)
 
 
 def _unpack_multigeometry[T](g: Geometry | list[Geometry] | np.ndarray, geometry_type: T) -> list[T]:
@@ -53,7 +59,9 @@ def unpack_multipolygon(g: Geometry | list[Geometry] | np.ndarray) -> list[Polyg
     return _unpack_multigeometry(g, Polygon)
 
 
-def unpack_multilinestring(g: Geometry | list[Geometry] | np.ndarray) -> list[LineString]:
+def unpack_multilinestring(
+    g: Geometry | list[Geometry] | np.ndarray,
+) -> list[LineString]:
     return _unpack_multigeometry(g, LineString)
 
 
@@ -63,13 +71,14 @@ def calculate_geodesic_area(p: Polygon) -> float:
 
 
 def process_polygons(
-        polygons: list[Polygon],
-        simplify_precision: float | None = None,
-        check_valid: bool = False,
-        unpack: bool = False,
-        check_empty: bool = False,
-        min_area_wgs84: float | None = None,
-        min_area_mm2: float | None = None) -> np.array:
+    polygons: list[Polygon],
+    simplify_precision: float | None = None,
+    check_valid: bool = False,
+    unpack: bool = False,
+    check_empty: bool = False,
+    min_area_wgs84: float | None = None,
+    min_area_mm2: float | None = None,
+) -> np.array:
     stat: dict[str, int] = {
         "input": 0,
         "output": 0,
@@ -120,11 +129,14 @@ def process_polygons(
     return polys
 
 
-def add_to_exclusion_zones(drawing_geometries: list[Geometry],
-                           exclusion_zones: MultiPolygon,
-                           exclude_buffer: float,
-                           simplification_tolerance: float = 0.1) -> MultiPolygon:
-    cutting_tool = shapely.unary_union(np.array(drawing_geometries))
-    cutting_tool = cutting_tool.buffer(exclude_buffer)
-    cutting_tool = shapely.simplify(cutting_tool, simplification_tolerance)
-    return shapely.union(exclusion_zones, cutting_tool)
+def add_to_exclusion_zones(
+    drawing_geometries: list[Geometry],
+    exclusion_zones: list[Polygon],
+    exclude_buffer: float,
+    simplification_tolerance: float = 0.5,
+) -> list[Polygon]:
+    # Note for .buffer(): reducing the quad segments from 8 (default) to 4 gives a speedup of ~40%
+
+    new_zones = shapely.simplify(drawing_geometries, simplification_tolerance)
+    new_zones = [shapely.buffer(g, exclude_buffer, quad_segs=4) for g in new_zones]
+    return new_zones + exclusion_zones

@@ -10,7 +10,6 @@ from layers import contour
 import subprocess
 
 if __name__ == "__main__":
-
     engine = create_engine("postgresql+psycopg://localhost:5432/lineworld")
 
     document_info = maptools.DocumentInfo()
@@ -32,7 +31,7 @@ if __name__ == "__main__":
             "fill": "none",
             "stroke": "blue",
             "stroke-width": "0.5",
-            "fill-opacity": "0.1"
+            "fill-opacity": "0.1",
         }
 
         options_contour = {
@@ -62,11 +61,14 @@ if __name__ == "__main__":
 
         svg.write()
 
-        logger.debug("[{}] running took {:5.2f}s".format(
-            param_name,
-            (datetime.datetime.now() - timer_start).total_seconds()
-        ))
+        logger.debug(
+            "[{}] running took {:5.2f}s".format(param_name, (datetime.datetime.now() - timer_start).total_seconds())
+        )
 
         png_filename = Path(svg_filename, ".png")
         # subprocess.run(f"inkscape --export -width=3000 --export -type=png --export -filename=\"{png_filename}\" \"{svg_filename}\"", shell=True, check=True)
-        subprocess.run(f"/Applications/Inkscape.app/Contents/MacOS/inkscape --export-type=\"png\" {svg_filename}", shell=True, check=True)
+        subprocess.run(
+            f'/Applications/Inkscape.app/Contents/MacOS/inkscape --export-type="png" {svg_filename}',
+            shell=True,
+            check=True,
+        )

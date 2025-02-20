@@ -12,7 +12,7 @@ from shapely import LineString, Point
 from svgpathtools import parse_path
 
 
-class HersheyFont():
+class HersheyFont:
     DEFAULT_FONT = "fonts/HersheySans1.svg"
 
     def __init__(self, font_file: Path = DEFAULT_FONT):
@@ -70,7 +70,9 @@ class HersheyFont():
                         ls = shapely.affinity.scale(ls, xfact=scaler, yfact=-scaler, origin=(0, 0, 0))
                         self.font_dict[char]["lines"].append(ls)
 
-    def _find_matching_line_point(self, line: LineString, start: float, end: float, reverse: bool = False) -> (tuple[np.ndarray, float, float] | None):
+    def _find_matching_line_point(
+        self, line: LineString, start: float, end: float, reverse: bool = False
+    ) -> tuple[np.ndarray, float, float] | None:
         """
         For a given LineString and a start/end point ind the closest matching point on the line for the start point and the
         angle to the end point
@@ -108,8 +110,9 @@ class HersheyFont():
 
             glyph = self.font_dict[c]
             linestrings = glyph["lines"]
-            linestrings = [shapely.affinity.scale(ls, xfact=font_size, yfact=font_size, origin=(0, 0, 0)) for ls in
-                           linestrings]
+            linestrings = [
+                shapely.affinity.scale(ls, xfact=font_size, yfact=font_size, origin=(0, 0, 0)) for ls in linestrings
+            ]
 
             output_dict["char"] = c
             output_dict["lines"] = linestrings
@@ -121,11 +124,16 @@ class HersheyFont():
 
         return output
 
-    def lines_for_text(self, text: str, font_size: float, path: LineString = None, reverse_path: bool = False) -> list[LineString]:
+    def lines_for_text(
+        self,
+        text: str,
+        font_size: float,
+        path: LineString = None,
+        reverse_path: bool = False,
+    ) -> list[LineString]:
         output = []
         glyphs = self.glyphs_for_text(text, font_size)
         for i, g in enumerate(glyphs):
-
             anchor_x = g["anchor"][0]
 
             if path is not None:
@@ -152,7 +160,6 @@ class HersheyFont():
         output = []
         glyphs = self.glyphs_for_text(text, font_size)
         for i, g in enumerate(glyphs):
-
             anchor_x = g["anchor"][0]  # + g["width"]/2
             match = self._find_matching_line_point(path, anchor_x, anchor_x + g["width"], reverse=True)
 
@@ -163,11 +170,21 @@ class HersheyFont():
             matching_point, angle = match
 
             # anchor
-            cv2.circle(img, [int(matching_point[0]), int(matching_point[1])], 4, (0, 0, 255), -1)
+            cv2.circle(
+                img,
+                [int(matching_point[0]), int(matching_point[1])],
+                4,
+                (0, 0, 255),
+                -1,
+            )
 
             # bounding box
-            bbox = shapely.box(0, -self.font_info["descent"] * FONT_SIZE, g["width"],
-                               -self.font_info["ascent"] * FONT_SIZE)
+            bbox = shapely.box(
+                0,
+                -self.font_info["descent"] * FONT_SIZE,
+                g["width"],
+                -self.font_info["ascent"] * FONT_SIZE,
+            )
             bbox = shapely.affinity.rotate(bbox, angle, origin=(0, 0, 0), use_radians=True)
             bbox = shapely.affinity.translate(bbox, xoff=matching_point[0], yoff=matching_point[1])
 
@@ -198,7 +215,9 @@ class HersheyFont():
         return output
 
 
-def _linestring_to_coordinate_pairs(linestring: LineString) -> list[list[tuple[float, float]]]:
+def _linestring_to_coordinate_pairs(
+    linestring: LineString,
+) -> list[list[tuple[float, float]]]:
     pairs = []
 
     for i in range(len(linestring.coords) - 1):
@@ -208,7 +227,6 @@ def _linestring_to_coordinate_pairs(linestring: LineString) -> list[list[tuple[f
 
 
 if __name__ == "__main__":
-
     TEXT = "The quick brown fox jumps over the lazy dog"
 
     FONT_SIZE = 54
@@ -222,15 +240,21 @@ if __name__ == "__main__":
 
     path = LineString([[1000, 800], [200, 700]])
     path = shapely.intersection(
-        LineString(list(Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 1.5]).buffer(
-            CANVAS_DIMENSIONS[0]).exterior.coords)),
-        shapely.box(100, 100, CANVAS_DIMENSIONS[0] - 100, CANVAS_DIMENSIONS[1] - 100)
+        LineString(
+            list(
+                Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 1.5])
+                .buffer(CANVAS_DIMENSIONS[0])
+                .exterior.coords
+            )
+        ),
+        shapely.box(100, 100, CANVAS_DIMENSIONS[0] - 100, CANVAS_DIMENSIONS[1] - 100),
     )
     path = path.segmentize(5)
 
     linestrings_along_path = font.lines_for_text(TEXT, FONT_SIZE, path=path)
-    linestrings = [shapely.affinity.translate(l, yoff=+CANVAS_DIMENSIONS[1] * 0.75) for l in
-                   font.lines_for_text(TEXT, FONT_SIZE)]
+    linestrings = [
+        shapely.affinity.translate(l, yoff=+CANVAS_DIMENSIONS[1] * 0.75) for l in font.lines_for_text(TEXT, FONT_SIZE)
+    ]
 
     for linestring in linestrings_along_path:
         for pair in _linestring_to_coordinate_pairs(linestring):

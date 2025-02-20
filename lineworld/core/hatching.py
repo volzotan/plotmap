@@ -1,11 +1,9 @@
 import math
 from dataclasses import dataclass
 from enum import Enum
-import random
 
 import numpy as np
 import shapely
-from shapely.affinity import affine_transform
 from shapely.geometry import MultiLineString, LineString, MultiPoint
 from shapely import Geometry, transform, affinity
 
@@ -20,12 +18,12 @@ class HatchingDirection(Enum):
 
 
 @dataclass
-class HatchingOptions():
-    angle: float = 45.
+class HatchingOptions:
+    angle: float = 45.0
     distance: float = 2.0
     # direction: HatchingDirection = HatchingDirection.ANGLE_45
     lift: bool = True
-    wiggle: float = 0.
+    wiggle: float = 0.0
 
 
 # def _create_hatch_lines(bbox: list[float], distance: float, direction: HatchingDirection) -> MultiLineString:
@@ -82,14 +80,14 @@ def _create_hatch_lines(bbox: list[float], distance: float, angle: float) -> Mul
     maxx = distance * math.ceil(maxx / distance)
     maxy = distance * math.ceil(maxy / distance)
 
-    diag = math.sqrt((maxx-minx)**2 + (maxy-miny)**2)
+    diag = math.sqrt((maxx - minx) ** 2 + (maxy - miny) ** 2)
 
     num = round(diag // distance)
 
     lines = []
 
     for i in range(num):
-        offset = (distance*i)-diag/2
+        offset = (distance * i) - diag / 2
         start = [-diag, offset]
         end = [+diag, offset]
         lines.append(LineString([start, end]))
@@ -97,7 +95,7 @@ def _create_hatch_lines(bbox: list[float], distance: float, angle: float) -> Mul
     mls = MultiLineString(lines)
 
     mls = affinity.rotate(mls, angle)
-    mls = affinity.translate(mls, xoff=minx+(maxx-minx)/2, yoff=miny+(maxy-miny)/2)
+    mls = affinity.translate(mls, xoff=minx + (maxx - minx) / 2, yoff=miny + (maxy - miny) / 2)
 
     return mls
 
@@ -108,19 +106,21 @@ def _combine(g: Geometry, hatch_lines: MultiLineString) -> MultiLineString:
     lines = lines[~shapely.is_empty(lines)]
     return MultiLineString(lines.tolist())
 
+
 def _randomize(g: Geometry) -> Geometry:
     def random_transform(x):
         rng = np.random.default_rng()
         rng.standard_normal(x.shape)
-        return x + rng.standard_normal(x.shape)/4
+        return x + rng.standard_normal(x.shape) / 4
 
     return transform(g, random_transform)
+
 
 def _segmentize(g: Geometry) -> Geometry:
     return shapely.segmentize(g, 25)
 
-def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: HatchingOptions) -> MultiLineString | None:
 
+def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: HatchingOptions) -> MultiLineString | None:
     # if no bbox is supplied (ie. by using ST_Envelope in PostGIS),
     # we'll compute our own (may be slow)
     if bbox is None:
@@ -131,7 +131,7 @@ def create_hatching(g: Geometry, bbox: list[float] | None, hatching_options: Hat
     hatch_lines = _create_hatch_lines(bbox, hatching_options.distance, hatching_options.angle)
 
     # sg = shapely.simplify(g, hatching_options.distance/2)
-    sg = g #g.buffer(1)
+    sg = g  # g.buffer(1)
 
     if shapely.is_empty(sg):
         return None

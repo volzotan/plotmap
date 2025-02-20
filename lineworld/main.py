@@ -1,4 +1,3 @@
-
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -16,12 +15,14 @@ templates = Jinja2Templates(directory="templates")
 
 engine = create_engine("postgresql+psycopg://localhost:5432/lineworld", echo=True)
 
-layerstack = LayerStack([
-    bathymetry.Bathymetry("Bathymetry", [0, -12_000], 15, engine),
-    contour.Contour("Contour", [0, 9_000], 15, engine),
-    coastlines.Coastlines("Coastlines", engine),
-    grid.Grid("Grid", engine)
-])
+layerstack = LayerStack(
+    [
+        bathymetry.Bathymetry("Bathymetry", [0, -12_000], 15, engine),
+        contour.Contour("Contour", [0, 9_000], 15, engine),
+        coastlines.Coastlines("Coastlines", engine),
+        grid.Grid("Grid", engine),
+    ]
+)
 
 
 @app.get("/", response_class=HTMLResponse)

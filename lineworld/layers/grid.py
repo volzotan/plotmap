@@ -24,14 +24,12 @@ from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
-class GridMapLines():
+class GridMapLines:
     id: int | None
     lines: MultiLineString
 
     def todict(self) -> dict[str, int | float | str | None]:
-        return {
-            "lines": str(from_shape(self.lines))
-        }
+        return {"lines": str(from_shape(self.lines))}
 
 
 class Grid(Layer):
@@ -52,7 +50,6 @@ class Grid(Layer):
         pass
 
     def load(self, geometries: list[GridMapLines]) -> None:
-
         if geometries is None:
             return
 
@@ -67,7 +64,6 @@ class Grid(Layer):
             conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
 
     def _get_gridminmax(self, document_info: DocumentInfo) -> tuple[list[float], list[float]]:
-
         minmax_lat = [-90, 90]
         minmax_lon = [-180, 180]
 
@@ -76,18 +72,21 @@ class Grid(Layer):
 
         return minmax_lat, minmax_lon
 
-    def _get_gridpositions(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> \
-            tuple[list[float], list[float]]:
-
+    def _get_gridpositions(
+        self,
+        document_info: DocumentInfo,
+        distance_lat_lines: float,
+        distance_lon_lines: float,
+    ) -> tuple[list[float], list[float]]:
         minmax_lat, minmax_lon = self._get_gridminmax(document_info)
 
-        lons = [x * distance_lat_lines for x in range(1, (minmax_lon[1] // distance_lat_lines)+1)]
+        lons = [x * distance_lat_lines for x in range(1, (minmax_lon[1] // distance_lat_lines) + 1)]
         lons = list(reversed([x * -1 for x in lons])) + [0] + lons
 
         if not lons[0] == minmax_lon[0]:
             lons = [minmax_lon[0]] + lons + [minmax_lon[1]]
 
-        lats = [x * distance_lon_lines for x in range(1, (minmax_lat[1] // distance_lon_lines)+1)]
+        lats = [x * distance_lon_lines for x in range(1, (minmax_lat[1] // distance_lon_lines) + 1)]
         lats = list(reversed(lats)) + [0] + [x * -1 for x in lats]
 
         if not lats[0] == minmax_lat[1]:
@@ -95,9 +94,12 @@ class Grid(Layer):
 
         return lats, lons
 
-    def _get_gridlines(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[
-        GridMapLines]:
-
+    def _get_gridlines(
+        self,
+        document_info: DocumentInfo,
+        distance_lat_lines: float,
+        distance_lon_lines: float,
+    ) -> list[GridMapLines]:
         lines = []
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
@@ -107,16 +109,10 @@ class Grid(Layer):
         lats, lons = self._get_gridpositions(document_info, distance_lat_lines, distance_lon_lines)
 
         for lat in lats:
-            lines.append(LineString([
-                [minmax_lon[0], lat],
-                [minmax_lon[1], lat]
-            ]))
+            lines.append(LineString([[minmax_lon[0], lat], [minmax_lon[1], lat]]))
 
         for lon in lons:
-            lines.append(LineString([
-                [lon, minmax_lat[0]],
-                [lon, minmax_lat[1]]
-            ]))
+            lines.append(LineString([[lon, minmax_lat[0]], [lon, minmax_lat[1]]]))
 
         lines = shapely.segmentize(lines, self.LAT_LON_MIN_SEGMENT_LENGTH)
 
@@ -125,9 +121,12 @@ class Grid(Layer):
 
         return [GridMapLines(None, line) for line in lines]
 
-    def _get_grid_polygons(self, document_info: DocumentInfo, distance_lat_lines: float, distance_lon_lines: float) -> list[
-        Polygon]:
-
+    def _get_grid_polygons(
+        self,
+        document_info: DocumentInfo,
+        distance_lat_lines: float,
+        distance_lon_lines: float,
+    ) -> list[Polygon]:
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()
 
@@ -135,20 +134,24 @@ class Grid(Layer):
         lats, lons = self._get_gridpositions(document_info, distance_lat_lines, distance_lon_lines)
 
         polys = []
-        for index_lat in range(len(lats)-1):
-            for index_lon in range(len(lons)-1):
-                polys.append(shapely.box(
-                    lons[index_lon],
-                    lats[index_lat],
-                    lons[index_lon+1],
-                    lats[index_lat+1]
-                ))
+        for index_lat in range(len(lats) - 1):
+            for index_lon in range(len(lons) - 1):
+                polys.append(
+                    shapely.box(
+                        lons[index_lon],
+                        lats[index_lat],
+                        lons[index_lon + 1],
+                        lats[index_lat + 1],
+                    )
+                )
 
         polys = shapely.segmentize(polys, self.LAT_LON_MIN_SEGMENT_LENGTH)
         polys = [shapely.ops.transform(project_func, poly) for poly in polys]
         polys = [affine_transform(poly, mat) for poly in polys]
 
-        viewport = shapely.box(0, 0, document_info.width, document_info.height) # TODO: use document_info.get_viewport()
+        viewport = shapely.box(
+            0, 0, document_info.width, document_info.height
+        )  # TODO: use document_info.get_viewport()
 
         polys_cropped = []
         for poly in polys:
@@ -188,13 +191,14 @@ class GridBathymetry(Grid):
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
-        
+
         metadata = MetaData()
 
         self.map_lines_table = Table(
-            "gridbathymetry_map_lines", metadata,
+            "gridbathymetry_map_lines",
+            metadata,
             Column("id", Integer, primary_key=True),
-            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
+            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
         )
 
         metadata.create_all(self.db)
@@ -223,7 +227,7 @@ class GridBathymetry(Grid):
             drawing_geometries,
             exclusion_zones,
             self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE),
-            self.config.get("tolerance", 0.1)
+            self.config.get("tolerance_exclusion_zones", 0.5),
         )
 
         return ([], exclusion_zones)
@@ -232,7 +236,7 @@ class GridBathymetry(Grid):
         return self._get_grid_polygons(
             document_info,
             self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
-            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST)
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST),
         )
 
 
@@ -256,9 +260,10 @@ class GridLabels(Grid):
         metadata = MetaData()
 
         self.map_lines_table = Table(
-            "gridlabels_map_lines", metadata,
+            "gridlabels_map_lines",
+            metadata,
             Column("id", Integer, primary_key=True),
-            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
+            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
         )
 
         metadata.create_all(self.db)
@@ -266,15 +271,16 @@ class GridLabels(Grid):
         self.font = HersheyFont()
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[GridMapLines]:
-
         gridlines = self._get_gridlines(
             document_info,
             self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
-            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST))
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST),
+        )
         lats, lons = self._get_gridpositions(
             document_info,
             self.config.get("latitude_line_dist", self.DEFAULT_LATITUDE_LINE_DIST),
-            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST))
+            self.config.get("longitude_line_dist", self.DEFAULT_LONGITUDE_LINE_DIST),
+        )
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()
@@ -282,7 +288,6 @@ class GridLabels(Grid):
         labels = []
 
         for lon in lons:
-
             line_label = lon
             if line_label < -180:
                 line_label = line_label + 360
@@ -310,8 +315,7 @@ class GridLabels(Grid):
             center_offset = -envelope(lines).centroid.x
 
             mat_font = document_info.get_transformation_matrix_font(
-                xoff=intersect_point_top.x + center_offset,
-                yoff=intersect_point_top.y
+                xoff=intersect_point_top.x + center_offset, yoff=intersect_point_top.y
             )
 
             labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
@@ -319,10 +323,22 @@ class GridLabels(Grid):
             # BOTTOM
 
             intersect_point_bottom = lon_line.intersection(
-                LineString([
-                    [0, document_info.height - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE)],
-                    [document_info.width, document_info.height - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE)]
-                ])
+                LineString(
+                    [
+                        [
+                            0,
+                            document_info.height
+                            - self.OFFSET_BOTTOM
+                            + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
+                        ],
+                        [
+                            document_info.width,
+                            document_info.height
+                            - self.OFFSET_BOTTOM
+                            + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
+                        ],
+                    ]
+                )
             )
 
             if intersect_point_bottom is None or intersect_point_bottom.is_empty:
@@ -331,13 +347,12 @@ class GridLabels(Grid):
 
             mat_font = document_info.get_transformation_matrix_font(
                 xoff=intersect_point_bottom.x + center_offset,
-                yoff=intersect_point_bottom.y
+                yoff=intersect_point_bottom.y,
             )
 
             labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
 
         for lat in lats:
-
             lines = MultiLineString(self.font.lines_for_text(f"{lat}", self.font_size))
 
             min_lon = -180
@@ -366,8 +381,7 @@ class GridLabels(Grid):
             center_offset = +envelope(lines).centroid.y
 
             mat_font = document_info.get_transformation_matrix_font(
-                xoff=intersect_point_left.x,
-                yoff=intersect_point_left.y + center_offset
+                xoff=intersect_point_left.x, yoff=intersect_point_left.y + center_offset
             )
 
             labels.append(GridMapLines(None, affine_transform(lines, mat_font)))
@@ -375,13 +389,19 @@ class GridLabels(Grid):
             # RIGHT
 
             intersect_point_right = lat_line.intersection(
-                LineString([
-                    [document_info.width - self.OFFSET_RIGHT, 0],
-                    [document_info.width - self.OFFSET_RIGHT, document_info.height]
-                ])
+                LineString(
+                    [
+                        [document_info.width - self.OFFSET_RIGHT, 0],
+                        [document_info.width - self.OFFSET_RIGHT, document_info.height],
+                    ]
+                )
             )
 
-            if type(intersect_point_right) is not Point or intersect_point_right is None or intersect_point_right.is_empty:
+            if (
+                type(intersect_point_right) is not Point
+                or intersect_point_right is None
+                or intersect_point_right.is_empty
+            ):
                 logger.warning(f"failed computing position for label [lat: {lat}]")
                 continue
 
@@ -389,7 +409,7 @@ class GridLabels(Grid):
 
             mat_font = document_info.get_transformation_matrix_font(
                 xoff=intersect_point_right.x - center_offset[0][0] * 2,
-                yoff=intersect_point_right.y + center_offset[1][0]
+                yoff=intersect_point_right.y + center_offset[1][0],
             )
 
             labels.append(GridMapLines(None, affine_transform(lines, mat_font)))

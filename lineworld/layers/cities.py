@@ -26,19 +26,18 @@ from lineworld.util.hersheyfont import HersheyFont
 
 
 @dataclass
-class CitiesLines():
+class CitiesLines:
     id: int | None
     circlelines: LineString
     labellines: MultiLineString
 
     def __repr__(self) -> str:
-        return (
-            f"CitiesLines [{self.id}]")
+        return f"CitiesLines [{self.id}]"
 
     def todict(self) -> dict[str, int | float | str | None]:
         return {
             "circlelines": str(from_shape(self.circlelines)),
-            "labellines": str(from_shape(self.labellines))
+            "labellines": str(from_shape(self.labellines)),
         }
 
 
@@ -63,10 +62,19 @@ class Cities(Layer):
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
-        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
-        self.cities_file = Path(self.data_dir, self.config.get("cities_filename", self.DEFAULT_CITIES_FILENAME))
-        self.labels_file = Path(self.data_dir, self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME))
-        self.font_size =  self.config.get("font_size", self.DEFAULT_FONT_SIZE)
+        self.data_dir = Path(
+            Layer.DATA_DIR_NAME,
+            self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower(),
+        )
+        self.cities_file = Path(
+            self.data_dir,
+            self.config.get("cities_filename", self.DEFAULT_CITIES_FILENAME),
+        )
+        self.labels_file = Path(
+            self.data_dir,
+            self.config.get("labels_filename", self.DEFAULT_LABELS_FILENAME),
+        )
+        self.font_size = self.config.get("font_size", self.DEFAULT_FONT_SIZE)
         self.city_circle_radius = self.config.get("city_circle_radius", self.DEFAULT_CITY_CIRCLE_RADIUS)
         self.exclude_buffer_distance = self.config.get("exclude_buffer_distance", self.DEFAULT_EXCLUDE_BUFFER_DISTANCE)
 
@@ -75,11 +83,13 @@ class Cities(Layer):
 
         metadata = MetaData()
 
-        self.map_lines_table = Table("cities_map_lines", metadata,
-                                     Column("id", Integer, primary_key=True),
-                                     Column("circlelines", geoalchemy2.Geometry("LINESTRING"), nullable=False),
-                                     Column("labellines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
-                                     )
+        self.map_lines_table = Table(
+            "cities_map_lines",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("circlelines", geoalchemy2.Geometry("LINESTRING"), nullable=False),
+            Column("labellines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
+        )
 
         metadata.create_all(self.db)
 
@@ -95,7 +105,6 @@ class Cities(Layer):
         pass
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[CitiesLines]:
-
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()
 
@@ -135,13 +144,20 @@ class Cities(Layer):
             minx, _, _, maxy = city_label[i].bounds
             c = [minx, maxy]
             text_lines = MultiLineString(self.font.lines_for_text(city_name[i], self.font_size))
-            text_lines = shapely.affinity.translate(text_lines, xoff=c[0] + self.city_circle_radius - 0.75, yoff=c[1] + 0.4)
-            lines.append(CitiesLines(None, city_pos[i].buffer(self.city_circle_radius).exterior, text_lines))
+            text_lines = shapely.affinity.translate(
+                text_lines, xoff=c[0] + self.city_circle_radius - 0.75, yoff=c[1] + 0.4
+            )
+            lines.append(
+                CitiesLines(
+                    None,
+                    city_pos[i].buffer(self.city_circle_radius).exterior,
+                    text_lines,
+                )
+            )
 
         return lines
 
     def load(self, geometries: list[CitiesLines]) -> None:
-
         if geometries is None:
             return
 

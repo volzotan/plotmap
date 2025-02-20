@@ -12,6 +12,7 @@ from shapely.ops import transform
 
 MORPH_KERNEL_SIZE = 7
 
+
 def _generate_elevation_lines(image: np.ndarray):
     """
     Generate openCV contour lines from raster images
@@ -77,14 +78,15 @@ def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: flo
 
     with rasterio.open(input_path) as src:
         data = src.read(
-            out_shape=(src.count, int(src.height * scaling_factor), int(src.width * scaling_factor)),
-            resampling=Resampling.bilinear
+            out_shape=(
+                src.count,
+                int(src.height * scaling_factor),
+                int(src.width * scaling_factor),
+            ),
+            resampling=Resampling.bilinear,
         )
 
-        transform = src.transform * src.transform.scale(
-            (src.width / data.shape[-1]),
-            (src.height / data.shape[-2])
-        )
+        transform = src.transform * src.transform.scale((src.width / data.shape[-1]), (src.height / data.shape[-2]))
 
         config = {
             "driver": "GTiff",
@@ -93,7 +95,7 @@ def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: flo
             "count": 1,
             "dtype": data.dtype,
             "crs": src.crs,
-            "transform": transform
+            "transform": transform,
         }
 
         with rasterio.open(output_path, "w", **config) as dst:
@@ -113,30 +115,31 @@ def merge_and_write(geotiff_paths: list[Path], output_path: Path) -> None:
             "count": 1,
             "dtype": mosaic.dtype,
             "crs": tiles[0].crs,
-            "transform": mosaic_transform
+            "transform": mosaic_transform,
         }
 
         with rasterio.open(output_path, "w", **config) as dst:
             dst.write(mosaic)
 
 
-def _extract_polygons(band: np.ndarray,
-                      threshold_value_low: float,
-                      threshold_value_high: float,
-                      allow_overlap: bool,
-                      mask: np.ndarray | None = None) -> list[Polygon | MultiPolygon]:
-
+def _extract_polygons(
+    band: np.ndarray,
+    threshold_value_low: float,
+    threshold_value_high: float,
+    allow_overlap: bool,
+    mask: np.ndarray | None = None,
+) -> list[Polygon | MultiPolygon]:
     if mask is None:
         mask = np.zeros_like(band, dtype=np.uint8)
     else:
-        mask[:,:] = 0
+        mask[:, :] = 0
 
-    if threshold_value_low > threshold_value_high: # bathymetry
+    if threshold_value_low > threshold_value_high:  # bathymetry
         mask[band < threshold_value_low] = 1
         if not allow_overlap:
             mask[band < threshold_value_high] = 0
 
-    else: # land elevation
+    else:  # land elevation
         mask[band > threshold_value_low] = 1
         if not allow_overlap:
             mask[band > threshold_value_high] = 0
@@ -201,6 +204,7 @@ def _extract_polygons(band: np.ndarray,
 
     return polygons
 
+
 def convert(geotiff_path: Path, layer_min_max: list[list[float]], allow_overlap: bool = True) -> list[list[Polygon]]:
     """
     geotiff_path: path of the GeoTiff image file
@@ -209,22 +213,25 @@ def convert(geotiff_path: Path, layer_min_max: list[list[float]], allow_overlap:
     """
 
     with rasterio.open(geotiff_path) as dataset:
-
         band = dataset.read(1)
 
         polygon_layers: list[list[Polygon]] = []
         mask = np.zeros_like(band, dtype=np.uint8)
 
         for layer_index in range(0, len(layer_min_max)):
-
             threshold_value_low = layer_min_max[layer_index][0]
             threshold_value_high = layer_min_max[layer_index][1]
 
-            extracted_geometries = _extract_polygons(band, threshold_value_low, threshold_value_high, allow_overlap, mask=mask)
+            extracted_geometries = _extract_polygons(
+                band,
+                threshold_value_low,
+                threshold_value_high,
+                allow_overlap,
+                mask=mask,
+            )
 
             polygons = []
             for g in extracted_geometries:
-
                 # convert pixel coordinates to lat lon with the geoTiff reference system
                 # flip xy for openCVs row,col order
                 g = transform(lambda x, y: dataset.xy(y, x), g)

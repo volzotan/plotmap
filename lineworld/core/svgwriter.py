@@ -6,7 +6,7 @@ from loguru import logger
 from shapely import Geometry, MultiLineString, LineString, Polygon
 
 
-class SvgWriter():
+class SvgWriter:
     type SvgOptions = dict[str, str | int | float]
 
     layers: dict[str, list[tuple[Geometry, SvgOptions]]]
@@ -30,7 +30,6 @@ class SvgWriter():
         self.styles[layer] = {**self.styles[layer], **options}
 
     def add(self, layer: str, geom: Geometry | list[Geometry], options: SvgOptions = {}) -> None:
-
         logger.debug(f"layer {layer}: adding {len(geom) if type(geom) is list else 1} object(s)")
 
         if layer not in self.layers:
@@ -46,10 +45,9 @@ class SvgWriter():
 
     def write_layer(self, out: TextIOWrapper, layer_name: str):
         layer = self.layers[layer_name]
-        out.write(f"<g inkscape:groupmode=\"layer\" id=\"{layer_name}\" inkscape:label=\"{layer_name}\">")
+        out.write(f'<g inkscape:groupmode="layer" id="{layer_name}" inkscape:label="{layer_name}">')
         for geom, options in layer:
             match geom:
-
                 # case Point():
                 #     pass
 
@@ -70,22 +68,22 @@ class SvgWriter():
         out.write("\n")
 
     def write(self):
-
         with open(self.filename, "w") as out:
-
-            out.write("<?xml version=\"1.0\" encoding=\"utf-8\" ?>\n")
+            out.write('<?xml version="1.0" encoding="utf-8" ?>\n')
             out.write(
-                "<?xml-stylesheet href=\"style.css\" type=\"text/css\" title=\"main_stylesheet\" alternate=\"no\" media=\"screen\" ?>\n")
+                '<?xml-stylesheet href="style.css" type="text/css" title="main_stylesheet" alternate="no" media="screen" ?>\n'
+            )
 
             if self.dimensions is not None:
                 out.write(
-                    f"<svg baseProfile=\"tiny\" version=\"1.2\" width=\"{self.dimensions[0]}px\" height=\"{self.dimensions[1]}px\" ")
+                    f'<svg baseProfile="tiny" version="1.2" width="{self.dimensions[0]}px" height="{self.dimensions[1]}px" '
+                )
             else:
-                out.write("<svg baseProfile=\"tiny\" version=\"1.2\" ")
-            out.write("xmlns=\"http://www.w3.org/2000/svg\" ")
-            out.write("xmlns:ev=\"http://www.w3.org/2001/xml-events\" ")
-            out.write("xmlns:xlink=\"http://www.w3.org/1999/xlink\" ")
-            out.write("xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" ")
+                out.write('<svg baseProfile="tiny" version="1.2" ')
+            out.write('xmlns="http://www.w3.org/2000/svg" ')
+            out.write('xmlns:ev="http://www.w3.org/2001/xml-events" ')
+            out.write('xmlns:xlink="http://www.w3.org/1999/xlink" ')
+            out.write('xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" ')
             out.write(">\n")
             out.write("<defs />\n")
             out.write("\n")
@@ -106,10 +104,10 @@ class SvgWriter():
             out.write("</style>\n")
 
             if self.image is not None:
-                out.write(f"<image x=\"0\" y=\"0\" xlink:href=\"{self.image}\" />")
+                out.write(f'<image x="0" y="0" xlink:href="{self.image}" />')
 
             if self.background_color is not None and self.debug:
-                out.write(f"<rect width=\"100%\" height=\"100%\" fill=\"{self.background_color}\"/>")
+                out.write(f'<rect width="100%" height="100%" fill="{self.background_color}"/>')
 
             out.write("\n")
 
@@ -124,10 +122,15 @@ class SvgWriter():
     def _write_lineString(self, out: StringIO, l: LineString, options: SvgOptions) -> None:
         self._write_path(out, l.coords, options, close=False)
 
-    def _write_path(self, out: StringIO, p: Any, options: SvgOptions, holes: list[Any] = [],
-                    close: bool = True) -> None:
-
-        out.write("<path d=\"")
+    def _write_path(
+        self,
+        out: StringIO,
+        p: Any,
+        options: SvgOptions,
+        holes: list[Any] = [],
+        close: bool = True,
+    ) -> None:
+        out.write('<path d="')
 
         x = float(p[0][0] - self.offset[0])
         y = float(p[0][1] - self.offset[1])
@@ -151,12 +154,12 @@ class SvgWriter():
                 out.write(f"L{x:.2f} {y:.2f} ")
 
         if close:
-            out.write("Z\"")
+            out.write('Z"')
         else:
-            out.write("\"")
+            out.write('"')
 
         for k, v in options.items():
-            out.write(f" {k}=\"{v}\"")
+            out.write(f' {k}="{v}"')
 
         out.write("/>")
         out.write("\n")

@@ -13,7 +13,7 @@ from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from loguru import logger
-from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon, LineString
+from shapely import to_wkt, Polygon, MultiLineString, LineString
 from shapely.affinity import affine_transform, translate
 from shapely.geometry import shape
 from sqlalchemy import MetaData
@@ -29,13 +29,12 @@ from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
 
 @dataclass
-class LandPolygon():
+class LandPolygon:
     id: int | None
     polygon: Polygon
 
     def __repr__(self) -> str:
-        return (
-            f"LandPolygon [{self.id}]")
+        return f"LandPolygon [{self.id}]"
 
     def todict(self) -> dict[str, int | float | str | WKBElement | None]:
         return {
@@ -44,20 +43,16 @@ class LandPolygon():
 
 
 @dataclass
-class CoastlineLines():
+class CoastlineLines:
     id: int | None
     polygon_id: int | None
     lines: MultiLineString
 
     def __repr__(self) -> str:
-        return (
-            f"CoastlineLines [{self.id}]")
+        return f"CoastlineLines [{self.id}]"
 
     def todict(self) -> dict[str, int | float | str | None]:
-        return {
-            "polygon_id": self.polygon_id,
-            "lines": str(from_shape(self.lines))
-        }
+        return {"polygon_id": self.polygon_id, "lines": str(from_shape(self.lines))}
 
 
 class Coastlines(Layer):
@@ -83,7 +78,10 @@ class Coastlines(Layer):
 
         self.data_url = self.config.get("data_url", self.DEFAULT_DATA_URL)
 
-        self.data_dir = Path(Layer.DATA_DIR_NAME, self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower())
+        self.data_dir = Path(
+            Layer.DATA_DIR_NAME,
+            self.config.get("layer_name", self.DEFAULT_LAYER_NAME).lower(),
+        )
         self.shapefile_dir = Path(self.data_dir, Path(self.data_url).stem)
 
         self.buffer_distance = self.config.get("buffer_distance", self.DEFAULT_BUFFER_DISTANCE)
@@ -96,24 +94,28 @@ class Coastlines(Layer):
 
         metadata = MetaData()
 
-        self.world_polygon_table = Table("coastlines_world_polygons", metadata,
-                                         Column("id", Integer, primary_key=True),
-                                         Column("polygon",
-                                                geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]),
-                                                nullable=False)
-                                         )
+        self.world_polygon_table = Table(
+            "coastlines_world_polygons",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column(
+                "polygon",
+                geoalchemy2.Geography("POLYGON", srid=self.DATA_SRID.value[1]),
+                nullable=False,
+            ),
+        )
 
-        self.map_lines_table = Table("coastlines_map_lines", metadata,
-                                     Column("id", Integer, primary_key=True),
-                                     Column("polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),
-                                     Column("lines",
-                                            geoalchemy2.Geometry("MULTILINESTRING"), nullable=False)
-                                     )
+        self.map_lines_table = Table(
+            "coastlines_map_lines",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),
+            Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
+        )
 
         metadata.create_all(self.db)
 
     def extract(self) -> None:
-
         filename_zip = Path(self.data_dir, Path(self.data_url).name)
 
         if not filename_zip.exists():
@@ -126,7 +128,6 @@ class Coastlines(Layer):
             shutil.unpack_archive(filename_zip, self.data_dir)
 
     def transform_to_world(self) -> list[LandPolygon]:
-
         logger.info("extracting land polygons from OSM shapefile")
 
         shapefiles = [Path(f) for f in self.shapefile_dir.iterdir() if f.is_file() and f.suffix == ".shp"]
@@ -146,7 +147,7 @@ class Coastlines(Layer):
             simplify_precision=self.LAT_LON_PRECISION,
             check_empty=True,
             check_valid=True,
-            unpack=True
+            unpack=True,
         )
 
         return [LandPolygon(None, polys[i]) for i in range(polys.shape[0])]
@@ -158,7 +159,7 @@ class Coastlines(Layer):
         with self.db.begin() as conn:
             params = {
                 "srid": document_info.projection.value[1],
-                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
+                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84,
             }
 
             # result = conn.execute(text(f"""
@@ -181,12 +182,15 @@ class Coastlines(Layer):
             #     WHERE ST_Area(polygon) >= :min_area
             # """), params)
 
-            result_center = conn.execute(text(f"""
+            result_center = conn.execute(
+                text(f"""
                 SELECT  id,
                         polygon AS poly
                 FROM {self.world_polygon_table.fullname}
                 WHERE ST_Area(polygon) >= :min_area
-            """), params)
+            """),
+                params,
+            )
 
             results = result_center.all()
             mat = document_info.get_transformation_matrix()
@@ -206,15 +210,18 @@ class Coastlines(Layer):
 
                 result_right = conn.execute(
                     select_slice,
-                    {**params, "viewport":
-                        to_wkt(shapely.box(-180, 85, -180 + self.WRAPOVER_LONGITUDE_EXTENSION, -85))
-                     }
+                    {
+                        **params,
+                        "viewport": to_wkt(shapely.box(-180, 85, -180 + self.WRAPOVER_LONGITUDE_EXTENSION, -85)),
+                    },
                 ).all()
 
                 result_left = conn.execute(
                     select_slice,
-                    {**params, "viewport":
-                        to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85))}
+                    {
+                        **params,
+                        "viewport": to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85)),
+                    },
                 ).all()
 
                 polygons_right = [translate(to_shape(WKBElement(x.poly)), xoff=360) for x in result_right]
@@ -235,7 +242,7 @@ class Coastlines(Layer):
                 min_area_mm2=self.FILTER_POLYGON_MIN_AREA_MAP,
                 check_empty=True,
                 check_valid=True,
-                unpack=True
+                unpack=True,
             )
 
             mlines = self._style(polygons, document_info)
@@ -244,9 +251,7 @@ class Coastlines(Layer):
 
             return processed_coastlinesPolygonLines
 
-    def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
-        MultiLineString]:
-
+    def _style(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[MultiLineString]:
         inner = shapely.unary_union(polygons)
 
         logger.debug("union done")
@@ -267,7 +272,11 @@ class Coastlines(Layer):
         hatching_options.distance = self.hatching_distance
         hatching_options.direction = HatchingDirection.ANGLE_45
 
-        hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
+        hatch = create_hatching(
+            buffered,
+            [0, 0, document_info.width, document_info.height],
+            hatching_options,
+        )
 
         if hatch is not None:
             return [MultiLineString(coastlines), hatch]
@@ -275,7 +284,6 @@ class Coastlines(Layer):
             return [MultiLineString(coastlines)]
 
     def load(self, geometries: list[LandPolygon | CoastlineLines]) -> None:
-
         if geometries is None:
             return
 
@@ -289,7 +297,10 @@ class Coastlines(Layer):
             case LandPolygon():
                 with self.db.begin() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
-                    conn.execute(insert(self.world_polygon_table), [g.todict() for g in geometries])
+                    conn.execute(
+                        insert(self.world_polygon_table),
+                        [g.todict() for g in geometries],
+                    )
 
             case CoastlineLines():
                 with self.db.begin() as conn:
@@ -325,10 +336,11 @@ class Coastlines(Layer):
         with self.db.begin() as conn:
             params = {
                 "srid": document_info.projection.value[1],
-                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84
+                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84,
             }
 
-            result = conn.execute(text("""
+            result = conn.execute(
+                text("""
                 WITH polys AS (
                     SELECT  id,
                             ST_MakeValid(
@@ -347,7 +359,9 @@ class Coastlines(Layer):
                     FROM polys
                 )
                 SELECT ST_Difference(ST_Buffer(un, 200000), un) as buffered from unions
-            """), params)
+            """),
+                params,
+            )
 
             results = result.all()
             mat = document_info.get_transformation_matrix()
@@ -362,9 +376,7 @@ class Coastlines(Layer):
 
             return processed_coastlinesPolygonLines
 
-    def style2(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[
-        MultiLineString]:
-
+    def style2(self, polygons: np.ndarray, document_info: DocumentInfo) -> list[MultiLineString]:
         logger.debug("style")
 
         buffered = shapely.unary_union(polygons)
@@ -375,7 +387,11 @@ class Coastlines(Layer):
         hatching_options.distance = 2.0
         hatching_options.direction = HatchingDirection.ANGLE_45
 
-        hatch = create_hatching(buffered, [0, 0, document_info.width, document_info.height], hatching_options)
+        hatch = create_hatching(
+            buffered,
+            [0, 0, document_info.width, document_info.height],
+            hatching_options,
+        )
 
         if hatch is not None:
             return [MultiLineString(hatch)]
