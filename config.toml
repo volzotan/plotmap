@@ -41,6 +41,7 @@ line_distance = [0.2, 2.0]
 blur_angles_kernel_size = 25
 blur_inclination_kernel_size = 10
 blur_density_kernel_size = 25
+line_distance_end_factor = 0.8
 
 [layer.Grid]
 latitude_line_dist = 20

@@ -485,7 +485,7 @@ class FlowlineHatcher():
                 (self.config.BLUR_DENSITY_KERNEL_SIZE, self.config.BLUR_DENSITY_KERNEL_SIZE)
             )
 
-    def _collision_approximate(self, x: float, y: float) -> bool:
+    def _collision_approximate(self, x: float, y: float, factor: float) -> bool:
         x = int(x)
         y = int(y)
 
@@ -495,7 +495,7 @@ class FlowlineHatcher():
             return True
 
         # half_d = int(self.density[y, x] / 2)
-        half_d = int(self._density(x, y) / 2)
+        half_d = int((self._density(x, y) / 2) * factor)
 
         return np.any(
             self.point_raster[
@@ -518,7 +518,7 @@ class FlowlineHatcher():
 
         return self.config.LINE_DISTANCE[0] * self.config.MM_TO_PX_CONVERSION_FACTOR + density_normalized * diff
 
-    def _collision_precise(self, x: float, y: float) -> bool:
+    def _collision_precise(self, x: float, y: float, factor: float) -> bool:
         # rx = round(x)
         # ry = round(y)
         # # d = self.density[ry, rx]
@@ -526,7 +526,7 @@ class FlowlineHatcher():
 
         rx = int(x)
         ry = int(y)
-        d = self._density(rx, ry)
+        d = self._density(rx, ry) * factor
         half_d = math.ceil(d / 2)
 
         x_minmax = [max(rx - half_d, 0), min(rx + half_d, self.elevation.shape[1])]
@@ -540,14 +540,13 @@ class FlowlineHatcher():
 
         return False
 
-    def _collision(self, x: float, y: float) -> bool:
+    def _collision(self, x: float, y: float, factor: float = 1.0) -> bool:
         if self.config.COLLISION_APPROXIMATE:
-            return self._collision_approximate(x, y)
+            return self._collision_approximate(x, y, factor)
         else:
-            return self._collision_precise(x, y)
+            return self._collision_precise(x, y, factor)
 
     def _next_point(self, x1: float, y1: float, forwards: bool) -> float:
-
         rx1 = int(x1)
         ry1 = int(y1)
 
@@ -731,6 +730,9 @@ if __name__ == "__main__":
     config.BLUR_ANGLES_KERNEL_SIZE = 50
     config.BLUR_DENSITY_KERNEL_SIZE = 50
     config.BLUR_INCLINATION_KERNEL_SIZE = 20
+
+    config.LINE_MAX_SEGMENTS = 30  # 6
+    config.LINE_DISTANCE = (0.3, 3.0)
 
     if args["BLUR_ANGLES_KERNEL_SIZE"] is not None:
         config.BLUR_ANGLES_KERNEL_SIZE = args["BLUR_ANGLES_KERNEL_SIZE"]
