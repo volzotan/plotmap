@@ -11,7 +11,7 @@ import numpy as np
 from shapely import LineString, Point
 
 DEFAULT_INPUT_FILENAME = "world.svg"
-DEFAULT_MAX_LENGTH_SEGMENT = 30 # in m
+DEFAULT_MAX_LENGTH_SEGMENT = 50  # in m
 
 # FILTER_BY_LAYER = ["coastlines"]
 # FILTER_BY_LAYER = ["coastlines_hatching"]
@@ -21,34 +21,34 @@ DEFAULT_MAX_LENGTH_SEGMENT = 30 # in m
 # FILTER_BY_LAYER = ["terrain"]
 # FILTER_BY_LAYER = ["meta"]
 
-OFFSET          = [0, 0] #[-1425, -000]
+OFFSET = [0, 0]  # [-1425, -000]
 
 # Rotate by 90 degrees
-ROTATE_90       = False
+ROTATE_90 = False
 
-TRAVEL_SPEED    = 6000
-WRITE_SPEED     = 4000
-PEN_LIFT_SPEED  = 3000
-PEN_DIP_SPEED   = 500
+TRAVEL_SPEED = 6000
+WRITE_SPEED = 3000
+PEN_LIFT_SPEED = 5000
+PEN_DIP_SPEED = 500
 
-PEN_UP_DISTANCE         = 1.5
-PEN_DIP_UP_DISTANCE     = 7.0
-PEN_DIP_DOWN_DISTANCE   = 0.5
+PEN_UP_DISTANCE = 3.0
+PEN_DIP_UP_DISTANCE = 7.0
+PEN_DIP_DOWN_DISTANCE = 2.0
 
-COMP_TOLERANCE  = 0.9
-MIN_LINE_LENGTH = 0.75 # in mm
+COMP_TOLERANCE = 0.9
+MIN_LINE_LENGTH = 0.75  # in mm
 
-WAIT_INIT       = 5000
+WAIT_INIT = 5000
 
-DIP_LOCATION    = [0, -20]
-DIP_DISTANCE    = 120
+DIP_LOCATION = [0, -20]
+DIP_DISTANCE = 120
 
-CMD_MOVE            = "G1 X{0:.3f} Y{1:.3f}\n"
-CMD_PEN_UP          = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
-CMD_PEN_DIP_UP      = "G1 Z{} F{}\n".format(PEN_DIP_UP_DISTANCE, PEN_LIFT_SPEED)
-CMD_PEN_DIP_DOWN    = "G1 Z{} F{}\n".format(PEN_DIP_DOWN_DISTANCE, PEN_DIP_SPEED)
+CMD_MOVE = "G1 X{0:.3f} Y{1:.3f}\n"
+CMD_PEN_UP = "G1 Z{} F{}\n".format(PEN_UP_DISTANCE, PEN_LIFT_SPEED)
+CMD_PEN_DIP_UP = "G1 Z{} F{}\n".format(PEN_DIP_UP_DISTANCE, PEN_LIFT_SPEED)
+CMD_PEN_DIP_DOWN = "G1 Z{} F{}\n".format(PEN_DIP_DOWN_DISTANCE, PEN_DIP_SPEED)
 
-OPTIMIZE_ORDER  = True
+OPTIMIZE_ORDER = True
 
 # np.set_printoptions(precision=4,
 #                        threshold=10000,
@@ -56,8 +56,8 @@ OPTIMIZE_ORDER  = True
 
 np.set_printoptions(suppress=True)
 
-def process_count(e: Any, default_namespace: str) -> int:
 
+def process_count(e: Any, default_namespace: str) -> int:
     if e.tag == default_namespace + "rect":
         return 4
 
@@ -66,10 +66,11 @@ def process_count(e: Any, default_namespace: str) -> int:
 
     if e.tag == default_namespace + "path":
         d = e.attrib["d"]
-        d = d[1:] # cut off the M
+        d = d[1:]  # cut off the M
         return len(d.split("L")) - 1
 
     return 0
+
 
 def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, float]]:
     lines = []
@@ -80,20 +81,27 @@ def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, f
         x2 = x1 + float(e.attrib["width"])
         y2 = y1 + float(e.attrib["height"])
 
-        lines.append([x1, y1, x1, y2]) # left
-        lines.append([x1, y1, x2, y1]) # top
-        lines.append([x1, y2, x2, y2]) # bottom
-        lines.append([x2, y1, x2, y2]) # right
+        lines.append([x1, y1, x1, y2])  # left
+        lines.append([x1, y1, x2, y1])  # top
+        lines.append([x1, y2, x2, y2])  # bottom
+        lines.append([x2, y1, x2, y2])  # right
 
         return lines
 
     if e.tag == default_namespace + "line":
-        lines.append([float(e.attrib["x1"]), float(e.attrib["y1"]), float(e.attrib["x2"]), float(e.attrib["y2"])])
+        lines.append(
+            [
+                float(e.attrib["x1"]),
+                float(e.attrib["y1"]),
+                float(e.attrib["x2"]),
+                float(e.attrib["y2"]),
+            ]
+        )
         return lines
 
     if e.tag == default_namespace + "path":
         d = e.attrib["d"]
-        d = d[1:] # cut off the M
+        d = d[1:]  # cut off the M
         segments = d.split("L")
 
         l = []
@@ -103,7 +111,7 @@ def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, f
             l.append([float(pairs[0]), float(pairs[1])])
 
         for i in range(1, len(l)):
-            lines.append([l[i-1][0], l[i-1][1], l[i][0], l[i][1]])
+            lines.append([l[i - 1][0], l[i - 1][1], l[i][0], l[i][1]])
 
         return lines
 
@@ -126,8 +134,9 @@ def compare_equal(e0, e1):
 
     return False
 
+
 # from: https://stackoverflow.com/a/34325723
-def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
+def printProgressBar(iteration, total, prefix="", suffix="", decimals=1, length=100, fill="█", printEnd="\r"):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -142,15 +151,14 @@ def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, 
     """
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filledLength = int(length * iteration // total)
-    bar = fill * filledLength + '-' * (length - filledLength)
-    print(f'\r{prefix} |{bar}| {percent}% {suffix}', end = printEnd)
+    bar = fill * filledLength + "-" * (length - filledLength)
+    print(f"\r{prefix} |{bar}| {percent}% {suffix}", end=printEnd)
     # Print New Line on Complete
     if iteration == total:
         print()
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -158,64 +166,41 @@ if __name__ == "__main__":
         default=DEFAULT_INPUT_FILENAME,
     )
 
-    parser.add_argument(
-        "--crop",
-        nargs="*",
-        type=int,
-        help="crop: center-X center-Y width height"
-    )
+    parser.add_argument("--crop", nargs="*", type=int, help="crop: center-X center-Y width height")
 
     parser.add_argument(
         "--max-length-segment",
         type=int,
         default=DEFAULT_MAX_LENGTH_SEGMENT,
-        help="maximum length of segment [m]"
+        help="maximum length of segment [m]",
     )
 
-    parser.add_argument(
-        "--filter-layer",
-        type=str,
-        default=None,
-        help="filter layers by name"
-    )
+    parser.add_argument("--filter-layer", type=str, default=None, help="filter layers by name")
 
-    parser.add_argument(
-        "--high-precision",
-        action="store_true",
-        help="high precision mode"
-    )
+    parser.add_argument("--high-precision", action="store_true", help="high precision mode")
 
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="process only the first n lines"
-    )
+    parser.add_argument("--limit", type=int, default=0, help="process only the first n lines")
 
-    parser.add_argument(
-        "--dip-mode",
-        default=False,
-        action="store_true",
-        help="enable dip pen mode"
-    )
+    parser.add_argument("--dip-mode", default=False, action="store_true", help="enable dip pen mode")
 
     args = parser.parse_args()
 
     crop_region = None
     if args.crop is not None:
-
         if len(args.crop) != 4:
-            print(f"invalid crop arguments: {args.crop}. Must be exactly four int values: [center-X, center-Y, widht, height]")
+            print(
+                f"invalid crop arguments: {args.crop}. Must be exactly four int values: [center-X, center-Y, widht, height]"
+            )
             sys.exit(2)
 
         crop_region = shapely.box(
-            args.crop[0]-args.crop[2]//2,
-            args.crop[1]-args.crop[3]//2,
-            args.crop[0]+args.crop[2]//2,
-            args.crop[1]+args.crop[3]//2,
+            args.crop[0] - args.crop[2] // 2,
+            args.crop[1] - args.crop[3] // 2,
+            args.crop[0] + args.crop[2] // 2,
+            args.crop[1] + args.crop[3] // 2,
         )
 
-    args.max_length_segment *= 100*10 # m to mm
+    args.max_length_segment *= 100 * 10  # m to mm
 
     tree = ET.parse(args.input_filename)
     root = tree.getroot()
@@ -223,6 +208,9 @@ if __name__ == "__main__":
     svg_inkscape_namespace = "{" + root.nsmap["inkscape"] + "}"
 
     output_filename = f"map_layer_{args.filter_layer}"
+
+    if args.dip_mode:
+        output_filename += "_dip"
 
     size = [root.get("width"), root.get("height")]
     for i, dim in enumerate(size):
@@ -239,13 +227,12 @@ if __name__ == "__main__":
 
     if args.high_precision:
         print("set to high precision mode")
-        COMP_TOLRANCE  = 0.001
+        COMP_TOLRANCE = 0.001
         MIN_LINE_LENGTH = 0.1
 
     all_lines = []
 
     for layer in root.findall("g", root.nsmap):
-
         if args.filter_layer is not None:
             if layer.attrib["id"] != args.filter_layer:
                 print(f"skip layer {layer.attrib['id']}")
@@ -255,22 +242,25 @@ if __name__ == "__main__":
         for child in layer:
             line_count += process_count(child, svg_default_namespace)
 
-        all_lines = np.zeros([line_count, 4], dtype=np.float64)
+        all_lines_np = np.zeros([line_count, 4], dtype=np.float64)
         fill_index = 0
 
         for i, child in enumerate(layer):
-            if i%100 == 0:
-                printProgressBar(i, len(layer), prefix=f"process layer: {layer.attrib.get("id", "UNNAMED_LAYER"):<25}")
+            if i % 100 == 0:
+                printProgressBar(
+                    i,
+                    len(layer),
+                    prefix=f"process layer: {layer.attrib.get("id", "UNNAMED_LAYER"):<25}",
+                )
 
             lines = process(child, svg_default_namespace)
 
             for line in lines:
-                all_lines[fill_index, :] = line
+                all_lines_np[fill_index, :] = line
                 fill_index += 1
 
-        all_lines = all_lines.tolist()
+        all_lines += all_lines_np.tolist()
         print("")
-
 
     if args.limit > 0:
         limit = min(len(all_lines), args.limit)
@@ -282,8 +272,7 @@ if __name__ == "__main__":
         crop_translation = crop_region.bounds[0:2]
 
         for i, line in enumerate(all_lines):
-
-            if i%100 == 0:
+            if i % 100 == 0:
                 printProgressBar(i, len(all_lines), prefix="cropping")
 
             ls = LineString([line[0:2], line[2:4]])
@@ -297,19 +286,16 @@ if __name__ == "__main__":
                     continue
 
                 case LineString():
+                    result = shapely.affinity.translate(result, xoff=-crop_translation[0], yoff=-crop_translation[1])
 
-                    result = shapely.affinity.translate(
-                        result,
-                        xoff=-crop_translation[0],
-                        yoff=-crop_translation[1]
+                    cropped_lines.append(
+                        [
+                            result.coords[0][0],
+                            result.coords[0][1],
+                            result.coords[1][0],
+                            result.coords[1][1],
+                        ]
                     )
-
-                    cropped_lines.append([
-                        result.coords[0][0],
-                        result.coords[0][1],
-                        result.coords[1][0],
-                        result.coords[1][1],
-                    ])
 
                 case _:
                     print(f"cropping: unexpected shapely geometry: {type(result)}")
@@ -335,7 +321,11 @@ if __name__ == "__main__":
     unique = np.unique(nplines, axis=0)
 
     number_duplicates = len(all_lines) - unique.shape[0]
-    print("cleaned duplicates: {0} | duplicate ratio: {1:.2f}%".format(number_duplicates, (number_duplicates/len(all_lines))*100))
+    print(
+        "cleaned duplicates: {0} | duplicate ratio: {1:.2f}%".format(
+            number_duplicates, (number_duplicates / len(all_lines)) * 100
+        )
+    )
 
     nplines = unique
 
@@ -352,7 +342,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------------------
     # mirror along X-axis to transfer SVG coordinate system (0 top left) to gcode (0 bottom left)
 
-    maxy = size[1] #np.max([np.max(nplines[:, 1]), np.max(nplines[:, 3])])
+    maxy = size[1]  # np.max([np.max(nplines[:, 1]), np.max(nplines[:, 3])])
     if crop_region is not None:
         maxy = crop_region.bounds[3] - crop_region.bounds[1]
         print(maxy)
@@ -369,7 +359,6 @@ if __name__ == "__main__":
     ordered_lines = None
 
     if OPTIMIZE_ORDER:
-
         timer = datetime.now()
 
         indices_done = [0]
@@ -385,8 +374,7 @@ if __name__ == "__main__":
         # nplines_masked = np.ma.masked_array(nplines, mask=indices_done_mask)
 
         for i in range(0, nplines.shape[0]):
-
-            if i%100 == 0:
+            if i % 100 == 0:
                 # print("{0:.2f}".format((len(ordered_lines)/nplines.shape[0])*100.0), end="\r")
                 printProgressBar(len(ordered_lines), nplines.shape[0], prefix="optimize order")
 
@@ -417,11 +405,17 @@ if __name__ == "__main__":
 
             # mnplines = np.ma.masked_array(nplines, mask=indices_done_mask, axis=0)
 
-            distance_forw = np.add(np.abs(np.subtract(nplines[:, 0], last[2])), np.abs(np.subtract(nplines[:, 1], last[3])))
+            distance_forw = np.add(
+                np.abs(np.subtract(nplines[:, 0], last[2])),
+                np.abs(np.subtract(nplines[:, 1], last[3])),
+            )
             distance_forw = np.ma.masked_array(distance_forw, mask=indices_done_mask)
             distance_forw_min = np.argmin(distance_forw)
 
-            distance_back = np.add(np.abs(np.subtract(nplines[:, 2], last[2])), np.abs(np.subtract(nplines[:, 3], last[3])))
+            distance_back = np.add(
+                np.abs(np.subtract(nplines[:, 2], last[2])),
+                np.abs(np.subtract(nplines[:, 3], last[3])),
+            )
             distance_back = np.ma.masked_array(distance_back, mask=indices_done_mask)
             distance_back_min = np.argmin(distance_back)
 
@@ -434,7 +428,7 @@ if __name__ == "__main__":
                 ordered_lines.append(np.array([flip[2], flip[3], flip[0], flip[1]]))
 
         print("")
-        print("optimization done. time: {0:.2f}s".format((datetime.now()-timer).total_seconds()))
+        print("optimization done. time: {0:.2f}s".format((datetime.now() - timer).total_seconds()))
 
     else:
         ordered_lines = nplines
@@ -444,14 +438,19 @@ if __name__ == "__main__":
 
     nplines = np.array(ordered_lines, dtype=float)
 
-    distances = np.sqrt(np.add(np.power(np.subtract(nplines[:, 0], nplines[:, 2]), 2), np.power(np.subtract(nplines[:, 1], nplines[:, 3]), 2)))
+    distances = np.sqrt(
+        np.add(
+            np.power(np.subtract(nplines[:, 0], nplines[:, 2]), 2),
+            np.power(np.subtract(nplines[:, 1], nplines[:, 3]), 2),
+        )
+    )
     indices_shortlines = np.where(distances < MIN_LINE_LENGTH)[0]
 
     unconnected_indices = []
-    for i in range(1, nplines.shape[0]-1):
-        prv = nplines[i-1, :]
-        cur = nplines[i  , :]
-        nxt = nplines[i+1, :]
+    for i in range(1, nplines.shape[0] - 1):
+        prv = nplines[i - 1, :]
+        cur = nplines[i, :]
+        nxt = nplines[i + 1, :]
 
         if not prv[2] == cur[0] or not prv[3] == cur[1] or not cur[2] == nxt[0] or not cur[3] == nxt[1]:
             if i in indices_shortlines:
@@ -460,10 +459,13 @@ if __name__ == "__main__":
     nplines = np.delete(nplines, unconnected_indices, axis=0)
     ordered_lines = nplines
 
-    print("cleaned unconnected short lines: {0} | short line ratio: {1:.2f}%".format(len(unconnected_indices), (len(unconnected_indices)/len(all_lines))*100))
+    print(
+        "cleaned unconnected short lines: {0} | short line ratio: {1:.2f}%".format(
+            len(unconnected_indices), (len(unconnected_indices) / len(all_lines)) * 100
+        )
+    )
 
     # ------------------------------------------------------------------------------------
-
 
     # ordered_lines = []
     # ordered_lines.append(all_lines[0])
@@ -532,41 +534,40 @@ if __name__ == "__main__":
     total_length_segment = 0
     for i in range(0, number_lines):
         dist = math.sqrt(
-            (ordered_lines[i][2]-ordered_lines[i][0])**2 + (ordered_lines[i][3]-ordered_lines[i][1])**2
+            (ordered_lines[i][2] - ordered_lines[i][0]) ** 2 + (ordered_lines[i][3] - ordered_lines[i][1]) ** 2
         )
 
         if (dist + total_length_segment) > args.max_length_segment:
             segments.append([])
-            print("new segment          [{:5.2f}m]".format(total_length_segment/1000))
+            print("new segment          [{:5.2f}m]".format(total_length_segment / 1000))
             total_length_segment = 0
         else:
             total_length_segment += dist
 
         segments[-1].append(ordered_lines[i])
 
-    print("last segment         [{:5.2f}m]".format(total_length_segment/1000))
+    print("last segment         [{:5.2f}m]".format(total_length_segment / 1000))
 
-    count_pen_up        = 0
-    count_pen_down      = 0
-    count_draw_moves    = 0
-    count_travel_moves  = 0
-    count_dip_moves     = 0
+    count_pen_up = 0
+    count_pen_down = 0
+    count_draw_moves = 0
+    count_travel_moves = 0
+    count_dip_moves = 0
 
     state_pen_up = True
 
     for s in range(0, len(segments)):
-
         segment = segments[s]
         filename = output_filename + f"_{s+1}of{len(segments)}.nc"
 
         distance_travelled = 0
 
         with open(filename, "w") as out:
-            out.write("G90\n")                          # absolute positioning
-            out.write("G21\n")                          # Set Units to Millimeters
-            out.write(CMD_PEN_UP)                       # move pen up
+            out.write("G90\n")  # absolute positioning
+            out.write("G21\n")  # Set Units to Millimeters
+            out.write(CMD_PEN_UP)  # move pen up
             # out.write(f"G4 P{WAIT_INIT}\n")              # wait before making the first move
-            out.write(f"G1 F{TRAVEL_SPEED}\n")          # Set feedrate to TRAVEL_SPEED mm/min
+            out.write(f"G1 F{TRAVEL_SPEED}\n")  # Set feedrate to TRAVEL_SPEED mm/min
             state_pen_up = True
             out.write("\n")
 
@@ -577,16 +578,19 @@ if __name__ == "__main__":
                 line = segment[i]
                 line_next = None
                 if (i + 1) < number_lines:
-                    line_next = segment[i+1]
+                    line_next = segment[i + 1]
 
-                line_start = [line[0]+OFFSET[0], line[1]+OFFSET[1]]
+                line_start = [line[0] + OFFSET[0], line[1] + OFFSET[1]]
                 if ROTATE_90:
-                    line_start = [line[1]+OFFSET[1], (line[0]+OFFSET[0]) * -1 + size[0]]
+                    line_start = [
+                        line[1] + OFFSET[1],
+                        (line[0] + OFFSET[0]) * -1 + size[0],
+                    ]
 
                 out.write(CMD_MOVE.format(*line_start))
 
                 # pen down
-                if (state_pen_up):
+                if state_pen_up:
                     count_travel_moves += 1
 
                     out.write(f"G1 Z0 F{PEN_LIFT_SPEED}\n")
@@ -594,9 +598,9 @@ if __name__ == "__main__":
                     state_pen_up = False
                     count_pen_down += 1
 
-                line_end = line[2]+OFFSET[0], line[3]+OFFSET[1]
+                line_end = line[2] + OFFSET[0], line[3] + OFFSET[1]
                 if ROTATE_90:
-                    line_end = line[3]+OFFSET[1], (line[2]+OFFSET[0]) * -1 + size[0]
+                    line_end = line[3] + OFFSET[1], (line[2] + OFFSET[0]) * -1 + size[0]
 
                 out.write(CMD_MOVE.format(*line_end))
 
@@ -616,10 +620,7 @@ if __name__ == "__main__":
 
                 # dip pen calculations
 
-                distance_travelled += math.sqrt(
-                    (line_end[0] - line_start[0])**2 +
-                    (line_end[1] - line_start[1])**2
-                )
+                distance_travelled += math.sqrt((line_end[0] - line_start[0]) ** 2 + (line_end[1] - line_start[1]) ** 2)
 
                 if args.dip_mode and distance_travelled > DIP_DISTANCE:
                     distance_travelled = 0
@@ -649,7 +650,6 @@ if __name__ == "__main__":
             # count_pen_down += 1
 
         print(f"write segment {s+1}/{len(segments)}: {filename}")
-
 
     print(f"count_pen_up:        {count_pen_up:>5}")
     print(f"count_pen_down:      {count_pen_down:>5}")

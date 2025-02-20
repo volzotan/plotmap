@@ -1,13 +1,6 @@
 from pathlib import Path
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-import numpy as np
-from pathlib import Path
-import cv2
-import numpy as np
-from shapely import LineString, Polygon, MultiPolygon
-from lineworld.core.hatching import HatchingOptions, HatchingDirection, create_hatching
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.gebco_grid_to_polygon import _extract_polygons, get_elevation_bounds
@@ -15,7 +8,7 @@ from lineworld.util.geometrytools import unpack_multipolygon
 
 import shapely
 
-from shapelysmooth import taubin_smooth, chaikin_smooth
+from shapelysmooth import taubin_smooth
 
 # INPUT_FILE = Path("data/hatching_dem.tif")
 # INPUT_FILE = Path("data/slope_test_2.tif")
@@ -33,6 +26,7 @@ MIN_AREA = 10
 SEGMENT_MAX_LENGTH = 10
 SIMPLIFY_TOLERANCE = 1.0
 
+
 def _read_data(input_path: Path) -> np.ndarray:
     data = cv2.imread(str(input_path), cv2.IMREAD_UNCHANGED)
     # data = cv2.resize(img, [30, 30])
@@ -43,8 +37,8 @@ def _read_data(input_path: Path) -> np.ndarray:
 
     return data
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     data = _read_data(INPUT_FILE)
 
     print(f"data {INPUT_FILE} min: {np.min(data)} / max: {np.max(data)}")
@@ -76,7 +70,7 @@ if __name__ == "__main__":
         "fill": "none",
         "stroke": "black",
         "stroke-width": "2.0",
-        "opacity": "0.5"
+        "opacity": "0.5",
     }
 
     svg.add("original", output, options=options)
@@ -95,7 +89,7 @@ if __name__ == "__main__":
         "fill": "none",
         "stroke": "red",
         "stroke-width": "2.0",
-        "opacity": "0.5"
+        "opacity": "0.5",
     }
 
     svg.add("taubin_5", output_taubin, options=options_taubin)
@@ -113,7 +107,7 @@ if __name__ == "__main__":
         "fill": "none",
         "stroke": "green",
         "stroke-width": "2.0",
-        "opacity": "0.5"
+        "opacity": "0.5",
     }
 
     svg.add("taubin_30", output_taubin, options=options_taubin)
@@ -131,7 +125,7 @@ if __name__ == "__main__":
         "fill": "none",
         "stroke": "blue",
         "stroke-width": "2.0",
-        "opacity": "0.5"
+        "opacity": "0.5",
     }
 
     svg.add("taubin_100", output_taubin, options=options_taubin)

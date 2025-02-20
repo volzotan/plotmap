@@ -1,4 +1,3 @@
-import numpy as np
 import rasterio
 from matplotlib import pyplot
 import tifffile
@@ -28,11 +27,14 @@ with rasterio.open(GEOTIFF_PATH) as dataset:
     band = dataset.read(1)
     y, x = dataset.index(*CENTER_LON_LAT)
 
-    crop = band[y-CROP_SIZE[1]//2:y+CROP_SIZE[1]//2, x-CROP_SIZE[0]//2:x+CROP_SIZE[0]//2]
+    crop = band[
+        y - CROP_SIZE[1] // 2 : y + CROP_SIZE[1] // 2,
+        x - CROP_SIZE[0] // 2 : x + CROP_SIZE[0] // 2,
+    ]
 
     crop = cv2.resize(crop, OUTPUT_SIZE)
 
     tifffile.imwrite(OUTPUT_PATH, crop)
 
-    pyplot.imshow(crop, cmap='pink')
+    pyplot.imshow(crop, cmap="pink")
     pyplot.show()

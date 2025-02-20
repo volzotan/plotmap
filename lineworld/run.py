@@ -13,7 +13,7 @@ from core import maptools
 from layers import contour
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities2
 from lineworld.util.export import convert_svg_to_png
 
 
@@ -31,14 +31,15 @@ def run() -> None:
     # exit()
 
     config = lineworld.get_config()
-    engine = create_engine(config["main"]["db_connection"]) # , echo=True)
+    engine = create_engine(config["main"]["db_connection"])  # , echo=True)
     document_info = maptools.DocumentInfo(config)
 
     layer_grid_bathymetry = grid.GridBathymetry("GridBathymetry", engine, config)
     layer_grid_labels = grid.GridLabels("GridLabels", engine, config)
 
-    layer_bathymetry = bflowlines.BathymetryFlowlines("BathymetryFlowlines", engine, config,
-                                                      tile_boundaries=layer_grid_bathymetry.get_polygons(document_info))
+    layer_bathymetry = bflowlines.BathymetryFlowlines(
+        "BathymetryFlowlines", engine, config, tile_boundaries=layer_grid_bathymetry.get_polygons(document_info)
+    )
     layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry", engine, config)
     layer_contour = contour.Contour("Contour", engine, config)
 
@@ -46,6 +47,9 @@ def run() -> None:
 
     layer_cities_labels = cities.CitiesLabels("CitiesLabels", engine, config)
     layer_cities_circles = cities.CitiesCircles("CitiesCircles", engine, config)
+
+    layer_cities2_labels = cities2.CitiesLabels("CitiesLabels", engine, config)
+    layer_cities2_circles = cities2.CitiesCircles("CitiesCircles", engine, config)
 
     layer_labels = labels.Labels("Labels", engine, config)
 
@@ -56,6 +60,8 @@ def run() -> None:
         # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
+        # layer_cities2_labels,
+        # layer_cities2_circles,
         # layer_labels,
         # layer_grid_bathymetry,
         # layer_grid_labels
@@ -96,10 +102,12 @@ def run() -> None:
     visible_layers = [
         # layer_cities_labels,
         # layer_cities_circles,
+        # layer_cities2_labels,
+        # layer_cities2_circles,
         layer_grid_labels,
         layer_labels,
         layer_coastlines,
-        layer_contour,
+        # layer_contour,
         layer_grid_bathymetry,
         layer_bathymetry,
         # layer_bathymetry2,
@@ -109,8 +117,14 @@ def run() -> None:
     draw_objects = {}
 
     for layer in visible_layers:
+        timer_start = datetime.datetime.now()
         draw, exclude = layer.out(exclude, document_info)
         draw_objects[layer.layer_id] = draw
+        logger.debug(
+            "{} layer subtraction in {:5.2f}s".format(
+                layer.layer_id, (datetime.datetime.now() - timer_start).total_seconds()
+            )
+        )
 
     svg_filename = config.get("name", "output")
     if not svg_filename.endswith(".svg"):
@@ -151,7 +165,7 @@ def run() -> None:
         "fill": "none",
         "stroke": "blue",
         "stroke-width": "0.40",
-        "fill-opacity": "0.1"
+        "fill-opacity": "0.1",
     }
 
     layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
@@ -196,13 +210,13 @@ def run() -> None:
         svg.add_style(k, v)
 
     for k, v in draw_objects.items():
-        svg.add(k, v) #, options=layer_styles.get(k.lower(), {}))
+        svg.add(k, v)  # , options=layer_styles.get(k.lower(), {}))
 
     svg.write()
     try:
         convert_svg_to_png(svg_filename, svg.dimensions[0] * 10)
     except Exception as e:
-        logger.error(f"SVG to PNG conversion failed: {e}")
+        logger.warning(f"SVG to PNG conversion failed: {e}")
 
     logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")
 

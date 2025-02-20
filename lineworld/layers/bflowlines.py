@@ -238,7 +238,7 @@ class BathymetryFlowlines(Layer):
         for g in drawing_geometries:
             g_processed = g
             for i in tree.query(g):
-                g_processed = shapely.difference(g_processed,  exclusion_zones[i])
+                g_processed = shapely.difference(g_processed, exclusion_zones[i])
                 if g_processed.is_empty:
                     break
             else:

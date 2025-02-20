@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 
 LUT_SIZE = 3000
 
+
 def slope_linear(lut_size=LUT_SIZE) -> float:
     lut = np.linspace(0, 1, num=lut_size)
     return lut
@@ -36,20 +37,19 @@ def slope_sine(lut_size=LUT_SIZE) -> float:
     return -(np.cos(math.pi * lut) - 1) / 2
 
 
-def quadratic_bezier(p1=[.25, .25], p2=[.75, .75], lut_size=LUT_SIZE) -> np.ndarray:
-
+def quadratic_bezier(p1=[0.25, 0.25], p2=[0.75, 0.75], lut_size=LUT_SIZE) -> np.ndarray:
     p0 = [0, 0]
     p3 = [1, 1]
 
-    t = np.linspace(0, 1, num=lut_size*3)
+    t = np.linspace(0, 1, num=lut_size * 3)
 
-    x = ((1 - t) ** 3) * p0[0] + 3 * ((1 - t) ** 2) * t * p1[0] + 3 * (1 - t) * (t ** 2) * p2[0] + (t ** 3) * p3[0]
-    y = ((1 - t) ** 3) * p0[1] + 3 * ((1 - t) ** 2) * t * p1[1] + 3 * (1 - t) * (t ** 2) * p2[1] + (t ** 3) * p3[1]
+    x = ((1 - t) ** 3) * p0[0] + 3 * ((1 - t) ** 2) * t * p1[0] + 3 * (1 - t) * (t**2) * p2[0] + (t**3) * p3[0]
+    y = ((1 - t) ** 3) * p0[1] + 3 * ((1 - t) ** 2) * t * p1[1] + 3 * (1 - t) * (t**2) * p2[1] + (t**3) * p3[1]
 
     lut = np.full([lut_size], -1, dtype=np.float64)
 
     for i in range(0, x.shape[0]):
-        lut[int(x[i] * (lut_size-1))] = y[i]
+        lut[int(x[i] * (lut_size - 1))] = y[i]
 
     if np.min(lut) == -1:
         raise Exception(f"unfilled LUT: {np.where(lut == -1)}")
@@ -62,8 +62,7 @@ def sigmoid(lut_size=LUT_SIZE) -> float:
     return 1 / (1 + np.exp(-lut))
 
 
-class Scale():
-
+class Scale:
     def __init__(self, func: Callable, params: dict[str, Any], num_output_bins: int | None = None) -> None:
         self.func = func
         self.params = params
@@ -71,13 +70,12 @@ class Scale():
         self.lut = self.func(**self.params)
 
     def apply(self, values: np.ndarray) -> np.ndarray:
-
-        output = None
+        output = values
 
         if not values.dtype == np.float64:
             output = (values / np.iinfo(values.dtype).max).astype(np.float64)
 
-        output = self.lut[(output * (self.lut.shape[0] - 1)).astype(int)] # returns dtype np.float64
+        output = self.lut[(output * (self.lut.shape[0] - 1)).astype(int)]  # returns dtype np.float64
 
         if self.num_output_bins is not None:
             output = np.digitize(output, np.linspace(0, 1, num=self.num_output_bins))
@@ -87,8 +85,8 @@ class Scale():
 
         return output
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     NUM_X_VALUES = 100
 
     scales = [
@@ -99,10 +97,10 @@ if __name__ == "__main__":
         [quadratic_bezier, {"p1": [0, 0.75], "p2": [1, 0.25]}],
         [quadratic_bezier, {"p1": [0, 0.50], "p2": [1, 0.50]}],
         [quadratic_bezier, {}],
-        [quadratic_bezier, {"p1": [0.25, 0], "p2": [.75, 1.0]}],
-        [quadratic_bezier, {"p1": [0.50, 0], "p2": [.50, 1.0]}],
-        [quadratic_bezier, {"p1": [0.75, 0], "p2": [.25, 1.0]}],
-        [quadratic_bezier, {"p1": [0.50, 0], "p2": [.75, 1.0]}],
+        [quadratic_bezier, {"p1": [0.25, 0], "p2": [0.75, 1.0]}],
+        [quadratic_bezier, {"p1": [0.50, 0], "p2": [0.50, 1.0]}],
+        [quadratic_bezier, {"p1": [0.75, 0], "p2": [0.25, 1.0]}],
+        [quadratic_bezier, {"p1": [0.50, 0], "p2": [0.75, 1.0]}],
     ]
 
     fig, axes = plt.subplots(nrows=2, ncols=len(scales))
@@ -113,7 +111,6 @@ if __name__ == "__main__":
     img = (cv2.imread(str(IMAGE_FILE), cv2.IMREAD_UNCHANGED)).astype(np.float64)
     img = cv2.resize(img, [1000, 1000])
     img = (img - np.min(img)) / (np.max(img) - np.min(img))
-
 
     for i in range(len(scales)):
         func = scales[i][0]
@@ -130,7 +127,7 @@ if __name__ == "__main__":
         ax.set_xlim([0, 1])
         ax.set_ylim([0, 1])
 
-        ax.set_aspect('equal')
+        ax.set_aspect("equal")
         ax.set_title(func.__name__ + "\n" + "".join([f" {k}: {v}" for k, v in args.items()]))
 
         ax = axes[1, i]

@@ -104,7 +104,10 @@ def standard_hatching_concentric(data: np.ndarray, **kwargs) -> list[MultiLineSt
 
     return output
 
-def standard_hatching_slope_orientation(data: np.ndarray, angles: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
+
+def standard_hatching_slope_orientation(
+    data: np.ndarray, angles: np.ndarray, **kwargs
+) -> list[MultiLineString | LineString]:
     output = []
     bounds = get_elevation_bounds([np.min(data), np.max(data)], LEVELS)
 
@@ -116,7 +119,6 @@ def standard_hatching_slope_orientation(data: np.ndarray, angles: np.ndarray, **
             polygons += unpack_multipolygon(g)
 
         for p in polygons:
-
             # mask = rasterize([p.buffer(-10)], out_shape=angles.shape)
             mask = rasterize([p], out_shape=angles.shape)
 
@@ -140,7 +142,7 @@ def _cut_linestring(ls: LineString) -> np.array:
     returns NumPy array [x1, y1, x2, y2]
     """
 
-    coordinate_pairs = np.zeros([len(ls.coords)-1, 4], dtype=float)
+    coordinate_pairs = np.zeros([len(ls.coords) - 1, 4], dtype=float)
 
     coordinate_pairs[:, 0] = ls.xy[0][:-1]
     coordinate_pairs[:, 1] = ls.xy[1][:-1]
@@ -149,12 +151,12 @@ def _cut_linestring(ls: LineString) -> np.array:
 
     return coordinate_pairs
 
+
 def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineString | LineString]]:
     """
     correct results if (and only if) bounds are supplied in the right order, from lower to higher, ie.
     BOUNDS = get_elevation_bounds([-20, 0], LEVELS)
     """
-
 
     angle = 135
     width = 90
@@ -177,7 +179,6 @@ def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineStrin
         polygons = [shapely.simplify(x, POST_SMOOTHING_SIMPLIFY_TOLERANCE) for x in polygons]
 
         for p in polygons:
-
             # area filtering
             # if p.area < 100.0:
             #     continue
@@ -205,7 +206,6 @@ def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineStrin
         for line in lines[~bright_mask]:
             output_dark.append(LineString([line[:2], line[2:]]))
 
-
     # detect if falling or rising slope works implicit due to reversed hole coordinate order
 
     # reassemble connected lines of same color to linestrings
@@ -214,28 +214,32 @@ def illuminated_contours(data: np.ndarray, **kwargs) -> list[list[MultiLineStrin
 
 
 def flowline_hatching(data: np.ndarray, **kwargs) -> list[MultiLineString | LineString]:
-
     c = FlowlineHatcherConfig()
 
     density_data = data
 
     density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
     density = np.full(density_data.shape, c.LINE_DISTANCE[0], dtype=float) + (
-            density_normalized * (c.LINE_DISTANCE[1] - c.LINE_DISTANCE[0]))
+        density_normalized * (c.LINE_DISTANCE[1] - c.LINE_DISTANCE[0])
+    )
 
     X, Y, dX, dY, angles, inclination = get_slope(data, 10)
 
     hatcher = FlowlineHatcher(
         shapely.box(0, 0, data.shape[1], data.shape[0]),
-        data, angles, inclination, density, c
+        data,
+        angles,
+        inclination,
+        density,
+        c,
     )
 
     linestrings = hatcher.hatch()
 
     return linestrings
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     # print(_cut_linestring(LineString([
     #     [0, 1],
     #     [10, 2],
@@ -261,7 +265,6 @@ if __name__ == "__main__":
     land_polys = _extract_polygons(data, *get_elevation_bounds([0, 10_000], 1)[0], True)
 
     for k, v in experiments_table.items():
-
         logger.info(f"running: {k}")
 
         hatchings = v(data, angles=angles)
@@ -289,7 +292,6 @@ if __name__ == "__main__":
             #     "stroke-width": "2.0",
             # }
 
-
             options_bright = {
                 "fill": "none",
                 "stroke": "skyblue",
@@ -306,7 +308,6 @@ if __name__ == "__main__":
             svg.add("contour_dark", hatchings[1], options=options_dark)
 
         else:
-
             options = {
                 "fill": "none",
                 "stroke": "black",
@@ -315,11 +316,7 @@ if __name__ == "__main__":
 
             svg.add("contour", hatchings, options=options)
 
-        options_land = {
-            "fill": "green",
-            "stroke": "none",
-            "fill-opacity": "0.5"
-        }
+        options_land = {"fill": "green", "stroke": "none", "fill-opacity": "0.5"}
 
         svg.add("land", land_polys, options=options_land)
 

@@ -14,12 +14,13 @@ SCALED_DIR = Path(DATA_DIR, "scaled")
 MOSAIC_FILE = Path(DATA_DIR, "gebco_mosaic.tif")
 REPROJECT_FILE = Path(DATA_DIR, "blender_reproject.tif")
 
-GEOTIFF_SCALING_FACTOR = 1/8 # correct ratio for blender
+GEOTIFF_SCALING_FACTOR = 1 / 8  # correct ratio for blender
 
 REPROJECT_FILE = Path(DATA_DIR, "fullsize_reproject.tif")
 GEOTIFF_SCALING_FACTOR = 1
 
 OVERWRITE = True
+
 
 def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: float) -> None:
     """
@@ -28,14 +29,15 @@ def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: flo
 
     with rasterio.open(input_path) as src:
         data = src.read(
-            out_shape=(src.count, int(src.height * scaling_factor), int(src.width * scaling_factor)),
-            resampling=Resampling.bilinear
+            out_shape=(
+                src.count,
+                int(src.height * scaling_factor),
+                int(src.width * scaling_factor),
+            ),
+            resampling=Resampling.bilinear,
         )
 
-        transform = src.transform * src.transform.scale(
-            (src.width / data.shape[-1]),
-            (src.height / data.shape[-2])
-        )
+        transform = src.transform * src.transform.scale((src.width / data.shape[-1]), (src.height / data.shape[-2]))
 
         config = {
             "driver": "GTiff",
@@ -44,7 +46,7 @@ def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: flo
             "count": 1,
             "dtype": data.dtype,
             "crs": src.crs,
-            "transform": transform
+            "transform": transform,
         }
 
         with rasterio.open(output_path, "w", **config) as dst:
@@ -64,7 +66,7 @@ def merge_and_write(geotiff_paths: list[Path], output_path: Path) -> None:
             "count": 1,
             "dtype": mosaic.dtype,
             "crs": tiles[0].crs,
-            "transform": mosaic_transform
+            "transform": mosaic_transform,
         }
 
         with rasterio.open(output_path, "w", **config) as dst:
@@ -77,12 +79,7 @@ def reproject_dataset(src: Path, dst: Path) -> None:
     with rasterio.open(src) as src:
         transform, width, height = calculate_default_transform(src.crs, dst_crs, src.width, src.height, *src.bounds)
         kwargs = src.meta.copy()
-        kwargs.update({
-            'crs': dst_crs,
-            'transform': transform,
-            'width': width,
-            'height': height
-        })
+        kwargs.update({"crs": dst_crs, "transform": transform, "width": width, "height": height})
 
         with rasterio.open(dst, "w", **kwargs) as dst:
             for i in range(1, src.count + 1):
@@ -98,12 +95,11 @@ def reproject_dataset(src: Path, dst: Path) -> None:
                     src_crs=src.crs,
                     dst_transform=transform,
                     dst_crs=dst_crs,
-                    resampling=Resampling.nearest
+                    resampling=Resampling.nearest,
                 )
 
 
 if __name__ == "__main__":
-
     logger.info("extracting elevation data from GeoTiffs")
 
     # Downscaling
