@@ -742,7 +742,7 @@ class FlowlineHatcher:
         return linestrings
 
 
-ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/blender_reproject.tif")
+ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
 # ELEVATION_FILE = Path("experiments/hatching/data/gebco_crop.tif")
 
 # DENSITY_FILE = Path("shaded_relief4.png")
@@ -782,9 +782,8 @@ if __name__ == "__main__":
     #
     # exit()
 
-    RESIZE_SIZE = [20_000, 20_000]
+    # RESIZE_SIZE = [20_000, 20_000]
     CROP_SIZE = [10000, 10000]
-    CROP_X, CROP_Y = [RESIZE_SIZE[0] // 2, RESIZE_SIZE[1] // 2]
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--resize", type=int)
@@ -819,7 +818,9 @@ if __name__ == "__main__":
         else:
             data = dataset.read(1)
 
-    data = cv2.resize(data, RESIZE_SIZE)
+    # data = cv2.resize(data, RESIZE_SIZE)
+
+    CROP_X, CROP_Y = [data.shape[0] // 2, data.shape[1] // 2]
     data = data[
         CROP_Y - CROP_SIZE[1] // 2 : CROP_Y + CROP_SIZE[1] // 2,
         CROP_X - CROP_SIZE[0] // 2 : CROP_X + CROP_SIZE[0] // 2,
@@ -844,20 +845,22 @@ if __name__ == "__main__":
     #
     # cv2.imwrite(Path(OUTPUT_PATH, "two_tone_split.png"), two_tone_highlights)
 
-    _, _, _, _, angles, inclination = get_slope(data, 1)
+    for i in range(1, 30):
+        _, _, _, _, angles, inclination = get_slope(data, i)
 
-    tanako_ang = cv2.inRange(np.degrees(angles), np.array([45 - 20]), np.array([45 + 20]))
-    # tanako_inc = cv2.inRange(inclination, np.array([500]), np.array([np.max(inclination)]))
-    tanako_inc = cv2.inRange(inclination, np.array([30]), np.array([2000]))
+        angle_width = 30
+        tanako_ang = cv2.inRange(np.degrees(angles), np.array([45 - angle_width/2]), np.array([45 + angle_width/2]))
+        # tanako_inc = cv2.inRange(inclination, np.array([500]), np.array([np.max(inclination)]))
+        tanako_inc = cv2.inRange(inclination, np.array([20]), np.array([2000]))
 
-    tanako = (np.logical_and(tanako_ang, tanako_inc) * 255).astype(np.uint8)
+        tanako = (np.logical_and(tanako_ang, tanako_inc) * 255).astype(np.uint8)
 
-    kernel = np.ones((3, 3), np.uint8)
-    tanako = cv2.morphologyEx(tanako, cv2.MORPH_OPEN, kernel)
-    tanako = cv2.morphologyEx(tanako, cv2.MORPH_CLOSE, kernel)
+        kernel = np.ones((3, 3), np.uint8)
+        tanako = cv2.morphologyEx(tanako, cv2.MORPH_OPEN, kernel)
+        tanako = cv2.morphologyEx(tanako, cv2.MORPH_CLOSE, kernel)
 
-    # cv2.imwrite(Path(OUTPUT_PATH, "tanako_base.png"), tanako)
-    # exit()
+        cv2.imwrite(Path(OUTPUT_PATH, f"tanako_base_stride_{i}.png"), tanako)
+    exit()
 
     two_tone_highlights = tanako
 
