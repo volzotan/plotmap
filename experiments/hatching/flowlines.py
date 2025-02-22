@@ -14,12 +14,17 @@ import shapely
 from dask.distributed import LocalCluster
 from loguru import logger
 from matplotlib import pyplot as plt
+from scipy import ndimage
 from shapely import LineString, Polygon, Point, MultiLineString
 
 from experiments.hatching import scales
 from experiments.hatching.slope import get_slope
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util import geometrytools
+
+
+MAPPING_DISTANCE = 0
+MAPPING_MAX_SEGMENTS = 1
 
 
 @dataclass
@@ -40,7 +45,7 @@ class FlowlineHatcherConfig:
     # How many line segments should be skipped before the next seedpoint is extracted
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 10
 
-    LINE_MAX_SEGMENTS: int = 5000
+    LINE_MAX_SEGMENTS: tuple[int, int] = (10, 50)
 
     BLUR_ANGLES: bool = True
     BLUR_ANGLES_KERNEL_SIZE: int = 10
@@ -48,8 +53,8 @@ class FlowlineHatcherConfig:
     BLUR_INCLINATION: bool = True
     BLUR_INCLINATION_KERNEL_SIZE: int = 10
 
-    BLUR_DENSITY_MAP: bool = True
-    BLUR_DENSITY_KERNEL_SIZE: int = 10
+    BLUR_MAPPING_DISTANCE: bool = True
+    BLUR_MAPPING_DISTANCE_KERNEL_SIZE: int = 10
 
     SCALE_ADJUSTMENT_VALUE: float = 0.3
 
@@ -61,12 +66,12 @@ class FlowlineTilerPoly:
     def __init__(
         self,
         elevation: np.ndarray,
-        density: np.ndarray | None,
+        mappings: np.ndarray,
         config: FlowlineHatcherConfig,
         polygons: list[Polygon],
     ):
         self.elevation = elevation
-        self.density = density  # optional
+        self.mappings = mappings
         self.config = config
         self.polygons = polygons
 
@@ -87,14 +92,6 @@ class FlowlineTilerPoly:
                 "p2": [1.0 - scale_adjustment_value, 1.0],
             },
         )
-        self.density_func = (
-            scale.apply,
-            np.min(self.elevation),
-            np.max(self.elevation),
-        )
-
-        if self.density is not None:
-            self.density = scale.apply(self.density)
 
         self.tiles = [{} for _ in polygons]
 
@@ -133,11 +130,6 @@ class FlowlineTilerPoly:
         for i, p in enumerate(self.polygons):
             logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i/len(self.polygons)*100.0:5.2f}%")
 
-            # TODO
-            # if i > 30:
-            #     self.tiles[i]["linestrings"] = []
-            #     continue
-
             min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
             max_col += 1
             max_row += 1
@@ -147,34 +139,20 @@ class FlowlineTilerPoly:
                 self.tiles[i]["linestrings"] = []
                 continue
 
-            density_tile = None
-            if self.density is not None:
-                density_tile = self.density[min_row:max_row, min_col:max_col]
-
-            crop = self.elevation[min_row:max_row, min_col:max_col]
-
-            # print(crop.dtype)
-            # print(density_tile.dtype)
-            # print(f"size polygon {np.asarray(p.exterior.coords).nbytes / 1024 / 1024:.2f}")
-            # print(f"size elevation {crop.nbytes / 1024 / 1024:.2f}")
-            # print(f"size density tile {density_tile.nbytes / 1024 / 1024:.2f}")
-            # print("----")
+            elevation_tile = self.elevation[min_row:max_row, min_col:max_col]
+            mappings_tile = self.mappings[min_row:max_row, min_col:max_col, :]
 
             def compute(
                 p: Polygon,
                 crop: np.ndarray,
-                density_tile: np.ndarray,
-                density_func: tuple,
+                mappings: np.ndarray,
                 config: FlowlineHatcherConfig,
                 xoff: float,
                 yoff: float,
             ) -> list[LineString]:
-                hatcher = FlowlineHatcher(p, crop, density_tile, density_func, config)
-
+                hatcher = FlowlineHatcher(p, crop, mappings, config)
                 linestrings = hatcher.hatch()
-
                 del hatcher
-
                 linestrings = [shapely.affinity.translate(ls, xoff=xoff, yoff=yoff) for ls in linestrings]
 
                 linestrings_cropped = []
@@ -197,9 +175,8 @@ class FlowlineTilerPoly:
                 client.submit(
                     compute,
                     p,
-                    np.copy(crop),
-                    np.copy(density_tile),
-                    self.density_func,
+                    np.copy(elevation_tile),
+                    np.copy(mappings_tile),
                     self.config,
                     min_col,
                     min_row,
@@ -251,12 +228,12 @@ class FlowlineTiler:
     def __init__(
         self,
         elevation: np.ndarray,
-        density: np.ndarray | None,
+        mappings: np.ndarray,
         config: FlowlineHatcherConfig,
         num_tiles: tuple[int, int],
     ):
         self.elevation = elevation
-        self.density = density  # optional
+        self.mappings = mappings
         self.config = config
         self.num_tiles = num_tiles
 
@@ -277,14 +254,6 @@ class FlowlineTiler:
                 "p2": [1.0 - scale_adjustment_value, 1.0],
             },
         )
-        self.density_func = (
-            scale.apply,
-            np.min(self.elevation),
-            np.max(self.elevation),
-        )
-
-        if self.density is not None:
-            self.density = scale.apply(self.density)
 
         self.tiles: list[list[dict[str, int | np.ndarray]]] = [
             [{} for _ in range(num_tiles[0])] for _ in range(num_tiles[1])
@@ -322,15 +291,13 @@ class FlowlineTiler:
                 else:
                     pass  # TODO
 
-                density_tile = None
-                if self.density is not None:
-                    density_tile = self.density[t["min_row"] : t["max_row"], t["min_col"] : t["max_col"]]
+                elevation_tile = self.elevation[t["min_row"] : t["max_row"], t["min_col"] : t["max_col"]]
+                mappings_tile = self.mappings[t["min_row"] : t["max_row"], t["min_col"] : t["max_col"], :]
 
                 hatcher = FlowlineHatcher(
                     shapely.box(0, 0, self.col_size, self.row_size),
-                    self.elevation[t["min_row"] : t["max_row"], t["min_col"] : t["max_col"]],
-                    density_tile,
-                    self.density_func,
+                    elevation_tile,
+                    mappings_tile,
                     self.config,
                     initial_seed_points=initial_seed_points,
                 )
@@ -441,7 +408,7 @@ class FlowlineTiler:
         # divider line
         output2[:, self.elevation.shape[1] : self.elevation.shape[1] + 2, :] = [0, 0, 0]
 
-        cv2.imwrite(Path(OUTPUT_PATH, "flowlines.png"), output2)
+        cv2.imwrite(str(Path(OUTPUT_PATH, "flowlines.png")), output2)
 
 
 class FlowlineHatcher:
@@ -451,16 +418,14 @@ class FlowlineHatcher:
         self,
         polygon: Polygon,
         elevation: np.ndarray,
-        density_map: np.ndarray | None,
-        density_func: tuple[Callable, float, float],
+        mappings: np.ndarray,
         config: FlowlineHatcherConfig,
         initial_seed_points: list[tuple[float, float]] = [],
         tile_name: str = "",
     ):
         self.polygon = polygon
         self.elevation = elevation
-        self.density_map = density_map
-        self.density_func = density_func
+        self.mappings = mappings
         self.config = config
         self.initial_seed_points = initial_seed_points
         self.tile_name = tile_name
@@ -487,15 +452,15 @@ class FlowlineHatcher:
         self.angles = angles
         self.inclination = inclination
 
-        # if the density map is not a normalized float array (for example to save
+        # if the mappings are not a normalized float array (for example to save
         # memory when using dask), we need to normalize it now
-        if self.density_map is not None and self.density_map.dtype not in [
+        if self.mappings.dtype not in [
             float,
             np.float16,
             np.float32,
             np.float64,
         ]:
-            self.density_map = self.density_map / np.iinfo(self.density_map.dtype).max
+            self.mappings = self.mappings / np.iinfo(self.mappings.dtype).max
 
         if self.config.BLUR_ANGLES:
             self.angles = cv2.blur(
@@ -515,12 +480,12 @@ class FlowlineHatcher:
                 ),
             )
 
-        if self.config.BLUR_DENSITY_MAP and self.density_map is not None:
-            self.density_map = cv2.blur(
-                self.density_map,
+        if self.config.BLUR_MAPPING_DISTANCE:
+            self.mappings[:, :, MAPPING_DISTANCE] = cv2.blur(
+                self.mappings[:, :, MAPPING_DISTANCE],
                 (
-                    self.config.BLUR_DENSITY_KERNEL_SIZE,
-                    self.config.BLUR_DENSITY_KERNEL_SIZE,
+                    self.config.BLUR_MAPPING_DISTANCE_KERNEL_SIZE,
+                    self.config.BLUR_MAPPING_DISTANCE_KERNEL_SIZE,
                 ),
             )
 
@@ -533,8 +498,7 @@ class FlowlineHatcher:
         if x >= self.point_raster.shape[1]:
             return True
 
-        # half_d = int(self.density[y, x] / 2)
-        half_d = int((self._density(x, y) / 2) * factor)
+        half_d = int((self._map_line_distance(x, y) / 2) * factor)
 
         return np.any(
             self.point_raster[
@@ -543,28 +507,26 @@ class FlowlineHatcher:
             ]
         )
 
-    def _density(self, x: int, y: int) -> float:
+    def _map_line_distance(self, x: int, y: int) -> float:
         diff = (self.config.LINE_DISTANCE[1] - self.config.LINE_DISTANCE[0]) * self.config.MM_TO_PX_CONVERSION_FACTOR
+        return float(
+            self.config.LINE_DISTANCE[0] * self.config.MM_TO_PX_CONVERSION_FACTOR
+            + self.mappings[y, x, MAPPING_DISTANCE] * diff
+        )
 
-        if self.density_map is not None:
-            density_normalized = self.density_map[y, x]
-        else:
-            scale_func, norm_min, norm_max = self.density_func
-            density_normalized = (self.elevation[y, x] - norm_min) / (norm_max - norm_min)
-            if scale_func is not None:
-                density_normalized = scale_func(density_normalized)
-
-        return self.config.LINE_DISTANCE[0] * self.config.MM_TO_PX_CONVERSION_FACTOR + density_normalized * diff
+    def _map_line_segments(self, x: int, y: int) -> float:
+        diff = self.config.LINE_MAX_SEGMENTS[1] - self.config.LINE_MAX_SEGMENTS[0]
+        return float(self.config.LINE_MAX_SEGMENTS[0] + self.mappings[y, x, MAPPING_MAX_SEGMENTS] * diff)
 
     def _collision_precise(self, x: float, y: float, factor: float) -> bool:
         # rx = round(x)
         # ry = round(y)
-        # # d = self.density[ry, rx]
-        # d = self._density(rx, ry)
+        # # d = self._map_line_distance[ry, rx]
+        # d = self._map_line_distance(rx, ry)
 
         rx = int(x)
         ry = int(y)
-        d = self._density(rx, ry) * factor
+        d = self._map_line_distance(rx, ry) * factor
         half_d = math.ceil(d / 2)
 
         x_minmax = [max(rx - half_d, 0), min(rx + half_d, self.elevation.shape[1])]
@@ -584,7 +546,7 @@ class FlowlineHatcher:
         else:
             return self._collision_precise(x, y, factor)
 
-    def _next_point(self, x1: float, y1: float, forwards: bool) -> float:
+    def _next_point(self, x1: float, y1: float, forwards: bool) -> tuple[float, float] | None:
         rx1 = int(x1)
         ry1 = int(y1)
 
@@ -643,7 +605,7 @@ class FlowlineHatcher:
                 a2 -= math.radians(90)
 
             # x4 = self.density[int(y3), int(x3)]
-            x4 = self._density(int(x3), int(y3))
+            x4 = self._map_line_distance(int(x3), int(y3))
             y4 = 0
 
             x5 = x4 * math.cos(a2) - y4 * math.sin(a2) + x3
@@ -655,7 +617,7 @@ class FlowlineHatcher:
             if x5 < 0 or x5 > self.bbox[2] or y5 < 0 or y5 > self.bbox[3]:  # TODO
                 continue
 
-            seed_points.append([x5, y5])
+            seed_points.append((x5, y5))
 
         return seed_points
 
@@ -702,22 +664,25 @@ class FlowlineHatcher:
             line_points = deque([seed])
 
             # follow gradient upwards
-            for _ in range(self.config.LINE_MAX_SEGMENTS):
+            for _ in range(self.config.LINE_MAX_SEGMENTS[1]):
                 p = self._next_point(*line_points[-1], True)
 
                 if p is None:
                     break
 
+                if len(line_points) > self._map_line_segments(int(p[0]), int(p[1])):
+                    break
+
                 line_points.append(p)
 
             # follow gradient downwards
-            for _ in range(self.config.LINE_MAX_SEGMENTS):
-                if len(line_points) >= self.config.LINE_MAX_SEGMENTS:
-                    break
-
+            for _ in range(self.config.LINE_MAX_SEGMENTS[1]):
                 p = self._next_point(*line_points[0], False)
 
                 if p is None:
+                    break
+
+                if len(line_points) > self._map_line_segments(int(p[0]), int(p[1])):
                     break
 
                 line_points.appendleft(p)
@@ -742,45 +707,77 @@ class FlowlineHatcher:
         return linestrings
 
 
-ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
-# ELEVATION_FILE = Path("experiments/hatching/data/gebco_crop.tif")
-
-# DENSITY_FILE = Path("shaded_relief4.png")
-DENSITY_FILE = ELEVATION_FILE
-
-TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender.png")
-TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender_blurred.png")
-TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender_2.png")
-
-OUTPUT_PATH = Path("experiments/hatching/output")
+# ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
+# # ELEVATION_FILE = Path("experiments/hatching/data/gebco_crop.tif")
+# # DENSITY_FILE = Path("shaded_relief4.png")
+# DENSITY_FILE = ELEVATION_FILE
+#
+# TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender.png")
+# TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender_blurred.png")
+# TWO_TONE_FILE = Path("experiments/hatching/data/two_tone_blender_2.png")
+#
+# OUTPUT_PATH = Path("experiments/hatching/output")
 
 if __name__ == "__main__":
-    # kernel3 = np.ones((3, 3), np.uint8)
-    # kernel5 = np.ones((5, 5), np.uint8)
-    # kernel7 = np.ones((7, 7), np.uint8)
-    # kernel11 = np.ones((11, 11), np.uint8)
-    #
-    # two_tone_data = cv2.imread(TWO_TONE_FILE, cv2.IMREAD_ANYCOLOR)
-    # two_tone_data = cv2.cvtColor(two_tone_data, cv2.COLOR_BGR2HSV)
-    #
-    # # BLUR_HIGHLIGHT_KERNEL_SIZE = 10
-    # # two_tone_data = cv2.blur(two_tone_data, (BLUR_HIGHLIGHT_KERNEL_SIZE, BLUR_HIGHLIGHT_KERNEL_SIZE))
-    #
-    # two_tone_highlights = cv2.inRange(two_tone_data, np.array([60 - 50, 10, 10]), np.array([60 + 50, 255, 255]))
-    #
-    # # BLUR_HIGHLIGHT_KERNEL_SIZE = 10
-    # # two_tone_highlights = cv2.blur(two_tone_highlights, (BLUR_HIGHLIGHT_KERNEL_SIZE, BLUR_HIGHLIGHT_KERNEL_SIZE))
-    #
-    # # Investigate braucht opening/closing ein uint8 in grayscale oder ein boolean array?
-    #
-    # two_tone_highlights = cv2.morphologyEx(two_tone_highlights, cv2.MORPH_OPEN, kernel5)
-    # two_tone_highlights = cv2.morphologyEx(two_tone_highlights, cv2.MORPH_CLOSE, kernel5)
-    #
-    # two_tone_data = cv2.resize(two_tone_data, [5000, 5000], cv2.INTER_NEAREST)
-    #
-    # cv2.imwrite(Path(OUTPUT_PATH, "two_tone_split.png"), two_tone_highlights)
-    #
-    # exit()
+    ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
+    ELEVATION_FILE = Path("experiments/hatching/data//gebco_crop.tif")
+    OUTPUT_PATH = Path("experiments/hatching/output")
+    RESIZE_SIZE = (3000, 3000)
+
+    data = None
+    with rasterio.open(str(ELEVATION_FILE)) as dataset:
+        # data = dataset.read(
+        #     out_shape=RESIZE_SIZE,
+        #     resampling=rasterio.enums.Resampling.bilinear,
+        # )[0]
+
+        data = dataset.read()[0]
+
+    data = cv2.resize(data, RESIZE_SIZE)
+
+    # CROP_CENTER = [.5,.5] # [0.4, 0.4]
+    # CROP_SIZE = [10000, 10000]
+    # data = data[
+    #        int(CROP_CENTER[1] * data.shape[1] - CROP_SIZE[1] // 2): int(
+    #            CROP_CENTER[1] * data.shape[1] + CROP_SIZE[1] // 2),
+    #        int(CROP_CENTER[0] * data.shape[0] - CROP_SIZE[0] // 2): int(
+    #            CROP_CENTER[0] * data.shape[0] + CROP_SIZE[0] // 2),
+    #        ]
+
+    elevation_normalized = (np.iinfo(np.uint8).max * ((data - np.min(data)) / np.ptp(data))).astype(np.uint8)
+
+    mappings = np.zeros([data.shape[0], data.shape[1], 2], dtype=np.uint8)
+    mappings[:, :, MAPPING_DISTANCE] = elevation_normalized[:, :]
+
+    WINDOW_SIZE = 25
+    MAX_WIN_VAR = 40000
+    win_mean = ndimage.uniform_filter(data.astype(float), (WINDOW_SIZE, WINDOW_SIZE))
+    win_sqr_mean = ndimage.uniform_filter(data.astype(float) ** 2, (WINDOW_SIZE, WINDOW_SIZE))
+    win_var = win_sqr_mean - win_mean**2
+    win_var = np.clip(win_var, 0, MAX_WIN_VAR)
+    win_var = win_var * -1 + MAX_WIN_VAR
+    win_var = (np.iinfo(np.uint8).max * ((win_var - np.min(win_var)) / np.ptp(win_var))).astype(np.uint8)
+
+    mappings[:, :, MAPPING_MAX_SEGMENTS] = win_var
+
+    # mappings[:,:, MAPPING_MAX_SEGMENTS] = np.full_like(mappings[:,:, MAPPING_MAX_SEGMENTS], 255)
+
+    cv2.imwrite(Path(OUTPUT_PATH, "MAPPING_DISTANCE.png"), mappings[:, :, MAPPING_DISTANCE])
+    cv2.imwrite(Path(OUTPUT_PATH, "MAPPING_MAX_SEGMENTS.png"), mappings[:, :, MAPPING_MAX_SEGMENTS])
+
+    config = FlowlineHatcherConfig()
+    tiler = FlowlineTiler(data, mappings, config, (2, 2))
+    linestrings = tiler.hatch()
+
+    svg = SvgWriter(Path(OUTPUT_PATH, "flowlines.svg"), data.shape)
+    options = {"fill": "none", "stroke": "black", "stroke-width": "2"}
+
+    svg.add("flowlines", linestrings, options=options)
+    svg.write()
+
+    exit()
+
+    # --------
 
     # RESIZE_SIZE = [20_000, 20_000]
     CROP_SIZE = [10000, 10000]
@@ -849,7 +846,7 @@ if __name__ == "__main__":
         _, _, _, _, angles, inclination = get_slope(data, i)
 
         angle_width = 30
-        tanako_ang = cv2.inRange(np.degrees(angles), np.array([45 - angle_width/2]), np.array([45 + angle_width/2]))
+        tanako_ang = cv2.inRange(np.degrees(angles), np.array([45 - angle_width / 2]), np.array([45 + angle_width / 2]))
         # tanako_inc = cv2.inRange(inclination, np.array([500]), np.array([np.max(inclination)]))
         tanako_inc = cv2.inRange(inclination, np.array([20]), np.array([2000]))
 
