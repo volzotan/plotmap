@@ -70,33 +70,6 @@ class HersheyFont:
                         ls = shapely.affinity.scale(ls, xfact=scaler, yfact=-scaler, origin=(0, 0, 0))
                         self.font_dict[char]["lines"].append(ls)
 
-    def _find_matching_line_point(
-        self, line: LineString, start: float, end: float, reverse: bool = False
-    ) -> tuple[np.ndarray, float, float] | None:
-        """
-        For a given LineString and a start/end point ind the closest matching point on the line for the start point and the
-        angle to the end point
-        """
-        coords = line.coords
-        if reverse:
-            coords = list(reversed(coords))
-
-        x_coords = np.array([x for x, y in coords])
-        x_coords -= x_coords[0]
-
-        if x_coords.shape[0] < 10:
-            logger.warning("line has less than 10 segments, probably missing segmentation")
-
-        match_start = coords[int(np.argsort(np.abs(x_coords - start))[0])]
-        match_end = coords[int(np.argsort(np.abs(x_coords - end))[0])]
-
-        if match_start[0] == match_end[0] and match_start[1] == match_end[1]:
-            return None
-
-        angle = math.atan2(match_end[1] - match_start[1], match_end[0] - match_start[0])
-
-        return (match_start, angle)
-
     def glyphs_for_text(self, text: str, font_size: float) -> list[dict[str, Any]]:
         horizontal_advance = 0
         output = []
@@ -124,20 +97,65 @@ class HersheyFont:
 
         return output
 
+    def _find_matching_line_point(
+        self, line: LineString, start: float, end: float, align_right: bool = False, reverse_path: bool = False
+    ) -> tuple[np.ndarray, float] | None:
+        """
+        For a given LineString and a start/end point find the closest matching point on the line for the start point
+        and the angle to the end point
+        """
+        coords = line.coords
+        if reverse_path:
+            coords = list(reversed(coords))
+
+        distance_on_line = np.zeros(len(coords), dtype=float)
+        for i in range(1, len(coords)):
+            distance_on_line[i] = distance_on_line[i-1] + math.sqrt(
+                (coords[i][0] - coords[i-1][0]) ** 2 +
+                (coords[i][1] - coords[i-1][1]) ** 2
+            )
+
+        if distance_on_line.shape[0] < 10:
+            logger.warning("line has less than 10 segments, probably missing segmentation")
+
+        if align_right:
+            match_start = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + end))[0])]
+            match_end = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + start))[0])]
+        else:
+            match_start = coords[int(np.argsort(np.abs(distance_on_line - start))[0])]
+            match_end = coords[int(np.argsort(np.abs(distance_on_line - end))[0])]
+
+        if match_start[0] == match_end[0] and match_start[1] == match_end[1]:
+            return None
+
+        angle = math.atan2(match_end[1] - match_start[1], match_end[0] - match_start[0])
+
+        return (match_start, angle)
+
+
     def lines_for_text(
         self,
         text: str,
         font_size: float,
         path: LineString = None,
+        align_right: bool = False,
         reverse_path: bool = False,
     ) -> list[LineString]:
         output = []
+
+        if align_right:
+            text = reversed(text)
+
         glyphs = self.glyphs_for_text(text, font_size)
         for i, g in enumerate(glyphs):
             anchor_x = g["anchor"][0]
 
             if path is not None:
-                match = self._find_matching_line_point(path, anchor_x, anchor_x + g["width"], reverse=reverse_path)
+                match = self._find_matching_line_point(
+                    path,
+                    anchor_x, anchor_x + g["width"],
+                    align_right=align_right,
+                    reverse_path=reverse_path)
 
                 if match is None:
                     logger.warning(f"path length insufficient, failed to draw glyph {g["char"]}")
@@ -238,29 +256,39 @@ if __name__ == "__main__":
 
     img = np.full(CANVAS_DIMENSIONS + [3], 255, dtype=np.uint8)
 
-    path = LineString([[1000, 800], [200, 700]])
-    path = shapely.intersection(
+    path1 = LineString([[1000, 800], [200, 700]])
+
+    path2 = shapely.intersection(
         LineString(
             list(
-                Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 1.5])
-                .buffer(CANVAS_DIMENSIONS[0])
+                Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 1.0])
+                .buffer(CANVAS_DIMENSIONS[0]* 0.6)
                 .exterior.coords
             )
         ),
         shapely.box(100, 100, CANVAS_DIMENSIONS[0] - 100, CANVAS_DIMENSIONS[1] - 100),
     )
-    path = path.segmentize(5)
+    path2 = path2.segmentize(1)
+    linestrings_along_path2 = font.lines_for_text(TEXT, FONT_SIZE, path=path2, align_right=False, reverse_path=True)
 
-    linestrings_along_path = font.lines_for_text(TEXT, FONT_SIZE, path=path)
-    linestrings = [
-        shapely.affinity.translate(l, yoff=+CANVAS_DIMENSIONS[1] * 0.75) for l in font.lines_for_text(TEXT, FONT_SIZE)
-    ]
-
-    for linestring in linestrings_along_path:
+    for linestring in linestrings_along_path2:
         for pair in _linestring_to_coordinate_pairs(linestring):
             pt1 = [int(c) for c in pair[0]]
             pt2 = [int(c) for c in pair[1]]
             cv2.line(img, pt1, pt2, (0, 0, 0), 4)
+
+    path3 = shapely.affinity.translate(path2, yoff=-250)
+    linestrings_along_path3 = font.lines_for_text(TEXT, FONT_SIZE, path=path3, align_right=True, reverse_path=True)
+
+    for linestring in linestrings_along_path3:
+        for pair in _linestring_to_coordinate_pairs(linestring):
+            pt1 = [int(c) for c in pair[0]]
+            pt2 = [int(c) for c in pair[1]]
+            cv2.line(img, pt1, pt2, (0, 0, 0), 4)
+
+    linestrings = [
+        shapely.affinity.translate(l, yoff=+CANVAS_DIMENSIONS[1] * 0.75) for l in font.lines_for_text(TEXT, FONT_SIZE)
+    ]
 
     for linestring in linestrings:
         for pair in _linestring_to_coordinate_pairs(linestring):
@@ -268,12 +296,12 @@ if __name__ == "__main__":
             pt2 = [int(c) for c in pair[1]]
             cv2.line(img, pt1, pt2, (0, 0, 0), 4)
 
-    for pair in _linestring_to_coordinate_pairs(path):
+    for pair in _linestring_to_coordinate_pairs(path2):
         pt1 = [int(c) for c in pair[0]]
         pt2 = [int(c) for c in pair[1]]
         cv2.line(img, pt1, pt2, (0, 0, 0), 2)
 
-    for pair in _linestring_to_coordinate_pairs(path):
+    for pair in _linestring_to_coordinate_pairs(path2):
         pt1 = [int(c) for c in pair[0]]
         pt2 = [int(c) for c in pair[1]]
         cv2.circle(img, pt2, 1, (0, 0, 255), -1)
