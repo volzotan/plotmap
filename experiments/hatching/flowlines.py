@@ -21,7 +21,7 @@ from experiments.hatching import scales
 from experiments.hatching.slope import get_slope
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util import geometrytools
-
+from lineworld.util.export import convert_svg_to_png
 
 MAPPING_DISTANCE = 0
 MAPPING_MAX_SEGMENTS = 1
@@ -31,10 +31,10 @@ MAPPING_MAX_SEGMENTS = 1
 class FlowlineHatcherConfig:
     # distance between lines in mm
     LINE_DISTANCE: tuple[float, float] = (0.3, 5.0)
-    LINE_DISTANCE_END_FACTOR = 1.0
+    LINE_DISTANCE_END_FACTOR = 0.5
 
     # distance between points constituting a line in mm
-    LINE_STEP_DISTANCE: float = 0.3
+    LINE_STEP_DISTANCE: float = 0.2
 
     MM_TO_PX_CONVERSION_FACTOR: int = 10
 
@@ -43,12 +43,12 @@ class FlowlineHatcherConfig:
     MIN_INCLINATION: float = 0.001  # 50.0
 
     # How many line segments should be skipped before the next seedpoint is extracted
-    SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 10
+    SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 5
 
     LINE_MAX_SEGMENTS: tuple[int, int] = (10, 50)
 
     BLUR_ANGLES: bool = True
-    BLUR_ANGLES_KERNEL_SIZE: int = 10
+    BLUR_ANGLES_KERNEL_SIZE: int = 40
 
     BLUR_INCLINATION: bool = True
     BLUR_INCLINATION_KERNEL_SIZE: int = 10
@@ -630,7 +630,7 @@ class FlowlineHatcher:
 
         # point grid for starting points, grid distance is mean line distance
         num_gridpoints = int(
-            (self.elevation.shape[0] / self.config.MM_TO_PX_CONVERSION_FACTOR) / self.config.LINE_DISTANCE[0]
+            (self.elevation.shape[0] / self.config.MM_TO_PX_CONVERSION_FACTOR) / self.config.LINE_DISTANCE[0] * 2
         )  # np.mean(self.config.LINE_DISTANCE))
         for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, num=num_gridpoints):
             for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, num=num_gridpoints):
@@ -719,10 +719,11 @@ class FlowlineHatcher:
 # OUTPUT_PATH = Path("experiments/hatching/output")
 
 if __name__ == "__main__":
-    ELEVATION_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
-    ELEVATION_FILE = Path("experiments/hatching/data//gebco_crop.tif")
+    ELEVATION_FILE = Path("experiments/hatching/data/gebco_crop.tif")
     OUTPUT_PATH = Path("experiments/hatching/output")
     RESIZE_SIZE = (3000, 3000)
+
+    timer_total_runtime = datetime.datetime.now()
 
     data = None
     with rasterio.open(str(ELEVATION_FILE)) as dataset:
@@ -762,18 +763,26 @@ if __name__ == "__main__":
 
     # mappings[:,:, MAPPING_MAX_SEGMENTS] = np.full_like(mappings[:,:, MAPPING_MAX_SEGMENTS], 255)
 
-    cv2.imwrite(Path(OUTPUT_PATH, "MAPPING_DISTANCE.png"), mappings[:, :, MAPPING_DISTANCE])
-    cv2.imwrite(Path(OUTPUT_PATH, "MAPPING_MAX_SEGMENTS.png"), mappings[:, :, MAPPING_MAX_SEGMENTS])
+    cv2.imwrite(str(Path(OUTPUT_PATH, "MAPPING_DISTANCE.png")), mappings[:, :, MAPPING_DISTANCE])
+    cv2.imwrite(str(Path(OUTPUT_PATH, "MAPPING_MAX_SEGMENTS.png")), mappings[:, :, MAPPING_MAX_SEGMENTS])
 
     config = FlowlineHatcherConfig()
     tiler = FlowlineTiler(data, mappings, config, (2, 2))
     linestrings = tiler.hatch()
 
-    svg = SvgWriter(Path(OUTPUT_PATH, "flowlines.svg"), data.shape)
+    svg_path = Path(OUTPUT_PATH, "flowlines.svg")
+    svg = SvgWriter(svg_path, data.shape)
     options = {"fill": "none", "stroke": "black", "stroke-width": "2"}
 
     svg.add("flowlines", linestrings, options=options)
     svg.write()
+
+    try:
+        convert_svg_to_png(svg_path, svg.dimensions[0] * 10)
+    except Exception as e:
+        logger.warning(f"SVG to PNG conversion failed: {e}")
+
+    logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")
 
     exit()
 
