@@ -1,5 +1,6 @@
 import math
 import xml.etree.ElementTree as ET
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,12 @@ import svgpathtools
 from loguru import logger
 from shapely import LineString, Point
 from svgpathtools import parse_path
+
+
+class Align(Enum):
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+    CENTER = "CENTER"
 
 
 class HersheyFont:
@@ -98,7 +105,7 @@ class HersheyFont:
         return output
 
     def _find_matching_line_point(
-        self, line: LineString, start: float, end: float, align_right: bool = False, reverse_path: bool = False
+        self, line: LineString, start: float, end: float, text_length: float, align: Align, reverse_path: bool = False
     ) -> tuple[np.ndarray, float] | None:
         """
         For a given LineString and a start/end point find the closest matching point on the line for the start point
@@ -110,52 +117,63 @@ class HersheyFont:
 
         distance_on_line = np.zeros(len(coords), dtype=float)
         for i in range(1, len(coords)):
-            distance_on_line[i] = distance_on_line[i-1] + math.sqrt(
-                (coords[i][0] - coords[i-1][0]) ** 2 +
-                (coords[i][1] - coords[i-1][1]) ** 2
+            distance_on_line[i] = distance_on_line[i - 1] + math.sqrt(
+                (coords[i][0] - coords[i - 1][0]) ** 2 + (coords[i][1] - coords[i - 1][1]) ** 2
             )
 
         if distance_on_line.shape[0] < 10:
             logger.warning("line has less than 10 segments, probably missing segmentation")
 
-        if align_right:
-            match_start = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + end))[0])]
-            match_end = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + start))[0])]
-        else:
-            match_start = coords[int(np.argsort(np.abs(distance_on_line - start))[0])]
-            match_end = coords[int(np.argsort(np.abs(distance_on_line - end))[0])]
+        match_start = None
+        match_end = None
+
+        match align:
+            case Align.LEFT:
+                match_start = coords[int(np.argsort(np.abs(distance_on_line - start))[0])]
+                match_end = coords[int(np.argsort(np.abs(distance_on_line - end))[0])]
+            case Align.CENTER:
+                offset = distance_on_line[-1] / 2 - text_length / 2
+                match_start = coords[int(np.argsort(np.abs(distance_on_line - start - offset))[0])]
+                match_end = coords[int(np.argsort(np.abs(distance_on_line - end - offset))[0])]
+            case Align.RIGHT:
+                match_start = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + end))[0])]
+                match_end = coords[int(np.argsort(np.abs(distance_on_line - distance_on_line[-1] + start))[0])]
+            case _:
+                raise Exception(f"unknown alignment state {align}")
+
+        if match_start is None or match_end is None:
+            return None
 
         if match_start[0] == match_end[0] and match_start[1] == match_end[1]:
             return None
 
         angle = math.atan2(match_end[1] - match_start[1], match_end[0] - match_start[0])
-
         return (match_start, angle)
-
 
     def lines_for_text(
         self,
         text: str,
         font_size: float,
         path: LineString = None,
-        align_right: bool = False,
+        align: Align = Align.LEFT,
+        center_vertical: bool = False,
         reverse_path: bool = False,
     ) -> list[LineString]:
         output = []
 
-        if align_right:
+        if align == Align.RIGHT:
             text = reversed(text)
 
         glyphs = self.glyphs_for_text(text, font_size)
+        total_text_length = np.sum([g["width"] for g in glyphs])
+
         for i, g in enumerate(glyphs):
             anchor_x = g["anchor"][0]
 
             if path is not None:
                 match = self._find_matching_line_point(
-                    path,
-                    anchor_x, anchor_x + g["width"],
-                    align_right=align_right,
-                    reverse_path=reverse_path)
+                    path, anchor_x, anchor_x + g["width"], total_text_length, align=align, reverse_path=reverse_path
+                )
 
                 if match is None:
                     logger.warning(f"path length insufficient, failed to draw glyph {g["char"]}")
@@ -171,6 +189,9 @@ class HersheyFont:
                 for linestring in g["lines"]:
                     linestring = shapely.affinity.translate(linestring, xoff=g["anchor"][0])
                     output.append(linestring)
+
+        if center_vertical:
+            output = [shapely.affinity.translate(ls, yoff=(self.font_info["ascent"] * font_size) / 2) for ls in output]
 
         return output
 
@@ -261,15 +282,15 @@ if __name__ == "__main__":
     path2 = shapely.intersection(
         LineString(
             list(
-                Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 1.0])
-                .buffer(CANVAS_DIMENSIONS[0]* 0.6)
+                Point([CANVAS_DIMENSIONS[0] / 2], [CANVAS_DIMENSIONS[1] * 0.7])
+                .buffer(CANVAS_DIMENSIONS[0] * 0.6)
                 .exterior.coords
             )
         ),
         shapely.box(100, 100, CANVAS_DIMENSIONS[0] - 100, CANVAS_DIMENSIONS[1] - 100),
     )
     path2 = path2.segmentize(1)
-    linestrings_along_path2 = font.lines_for_text(TEXT, FONT_SIZE, path=path2, align_right=False, reverse_path=True)
+    linestrings_along_path2 = font.lines_for_text(TEXT, FONT_SIZE, path=path2, align=Align.LEFT, reverse_path=True)
 
     for linestring in linestrings_along_path2:
         for pair in _linestring_to_coordinate_pairs(linestring):
@@ -277,10 +298,21 @@ if __name__ == "__main__":
             pt2 = [int(c) for c in pair[1]]
             cv2.line(img, pt1, pt2, (0, 0, 0), 4)
 
-    path3 = shapely.affinity.translate(path2, yoff=-250)
-    linestrings_along_path3 = font.lines_for_text(TEXT, FONT_SIZE, path=path3, align_right=True, reverse_path=True)
+    path3 = shapely.affinity.translate(path2, yoff=200)
+    linestrings_along_path3 = font.lines_for_text(TEXT, FONT_SIZE, path=path3, align=Align.RIGHT, reverse_path=True)
 
     for linestring in linestrings_along_path3:
+        for pair in _linestring_to_coordinate_pairs(linestring):
+            pt1 = [int(c) for c in pair[0]]
+            pt2 = [int(c) for c in pair[1]]
+            cv2.line(img, pt1, pt2, (0, 0, 0), 4)
+
+    path4 = shapely.affinity.translate(path3, yoff=200)
+    linestrings_along_path4 = font.lines_for_text(
+        "quick brown fox", FONT_SIZE, path=path4, align=Align.CENTER, reverse_path=True
+    )
+
+    for linestring in linestrings_along_path4:
         for pair in _linestring_to_coordinate_pairs(linestring):
             pt1 = [int(c) for c in pair[0]]
             pt2 = [int(c) for c in pair[1]]
