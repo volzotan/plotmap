@@ -433,6 +433,7 @@ dependencies = [
     { name = "shapely", marker = "(platform_machine != 'aarch64' and python_full_version >= '3.12') or (platform_system != 'Linux' and python_full_version >= '3.12') or platform_system == 'Darwin' or (platform_machine == 'aarch64' and platform_system == 'Linux')" },
     { name = "svgpathtools", marker = "(platform_machine != 'aarch64' and python_full_version >= '3.12') or (platform_system != 'Linux' and python_full_version >= '3.12') or platform_system == 'Darwin' or (platform_machine == 'aarch64' and platform_system == 'Linux')" },
     { name = "tifffile", marker = "(platform_machine != 'aarch64' and python_full_version >= '3.12') or (platform_system != 'Linux' and python_full_version >= '3.12') or platform_system == 'Darwin' or (platform_machine == 'aarch64' and platform_system == 'Linux')" },
+    { name = "toml", marker = "(platform_machine != 'aarch64' and python_full_version >= '3.12') or (platform_system != 'Linux' and python_full_version >= '3.12') or platform_system == 'Darwin' or (platform_machine == 'aarch64' and platform_system == 'Linux')" },
 ]
 
 [package.metadata]
@@ -456,6 +457,7 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.0.6" },
     { name = "svgpathtools", specifier = ">=1.6.1" },
     { name = "tifffile", specifier = ">=2024.12.12" },
+    { name = "toml", specifier = ">=0.10.2" },
 ]
 
 [[package]]
@@ -1085,6 +1087,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/37/c9/fc4e490c5b0ccad68c98ea1d6e0f409bd7d50e2e8fc30a0725594d3104ff/tifffile-2024.12.12.tar.gz", hash = "sha256:c38e929bf74c04b6c8708d87f16b32c85c6d7c2514b99559ea3db8003ba4edda", size = 365416 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/1e/76cbc758f6865a9da18001ac70d1a4154603b71e233f704401fc7d62493e/tifffile-2024.12.12-py3-none-any.whl", hash = "sha256:6ff0f196a46a75c8c0661c70995e06ea4d08a81fe343193e69f1673f4807d508", size = 227538 },
+]
+
+[[package]]
+name = "toml"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588 },
 ]
 
 [[package]]
