@@ -1,44 +1,33 @@
 import csv
+import datetime
 import math
 import random
-from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import shapely
 from shapely.ops import transform
-from shapely import Point, LineString, MultiLineString, STRtree
+from shapely import Point, LineString, MultiLineString, STRtree, Polygon
 from shapely.affinity import affine_transform, translate
 
+import lineworld
 from lineworld.core import maptools
-from lineworld.core.maptools import Projection
+from lineworld.core.maptools import Projection, DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.hersheyfont import HersheyFont, Align
 
 from loguru import logger
 
-INPUT_FILE = Path("experiments/labelplacement/cities.csv")
-OUTPUT_PATH = Path("experiments/labelplacement/output")
-
-DOCUMENT_SIZE = [1000, 1000]
+DEFAULT_MAX_ITERATIONS = 10_000
 
 FONT_SIZE = 5
 OFFSET_FROM_CENTER = 5
 CIRCLE_RADIUS = 1.5
 BOX_SAFETY_MARGIN = 1.0
 
-FILTER_MIN_POPULATION = 1_000_000
-
-cities = []
-
-debug_map_circles = []
-debug_map_labels = []
-
-document_info = maptools.DocumentInfo({})
-project_func = document_info.get_projection_func(Projection.WGS84)
-mat = document_info.get_transformation_matrix()
-
-font = HersheyFont()
+DEFAULT_FILTER_MIN_POPULATION = 1_000_000
 
 positions = {
     "top-right": {"pos": 315, "align": Align.LEFT, "error": 0},
@@ -51,234 +40,263 @@ positions = {
     "center-bottom": {"pos": 90, "align": Align.CENTER, "error": 7},
 }
 
-position_errors = [positions[key]["error"] for key in positions.keys()]
 
-with open(INPUT_FILE) as csvfile:
-    reader = csv.DictReader(csvfile, delimiter=";")
-    for row in reader:
-        population = int(row["population"])
-        if population < FILTER_MIN_POPULATION:
-            continue
-
-        lon = float(row["lon"])
-        lat = float(row["lat"])
-        label = row["ascii_name"]
-
-        p = Point([lon, lat])
-
-        p = transform(project_func, p)
-        p = affine_transform(p, mat)
-
-        circle = p.buffer(CIRCLE_RADIUS)
-        debug_map_circles.append(circle)
-
-        positions_boxes = []
-        positions_text = []
-        for k in positions.keys():
-            sin = math.sin(math.radians(positions[k]["pos"]))
-            cos = math.cos(math.radians(positions[k]["pos"]))
-
-            xnew = OFFSET_FROM_CENTER * cos - 0 * sin + p.x
-            ynew = OFFSET_FROM_CENTER * sin + 0 * cos + p.y
-
-            # TODO:
-            #  hard: backproject xnew, ynew to lat lon so we compute the baseline path for the font
-            #  easy: compute the baseline path only once for right and left and move it up and down to the different positions
-
-            path_coords = None
-            match positions[k]["align"]:
-                case Align.LEFT:
-                    path_coords = [[lon, lat], [lon + 50, lat]]
-                case Align.RIGHT:
-                    path_coords = [[lon - 50, lat], [lon, lat]]
-                case Align.CENTER:
-                    path_coords = [[lon - 25, lat], [lon + 25, lat]]
-                case _:
-                    raise Exception(f"unexpected enum state align: {positions[k]["align"]}")
-
-            path = LineString(path_coords).segmentize(0.1)
-            path = transform(project_func, path)
-            path = affine_transform(path, mat)
-            path = translate(path, xoff=xnew - p.x, yoff=ynew - p.y)
-            lines = MultiLineString(
-                font.lines_for_text(label, FONT_SIZE, align=positions[k]["align"], center_vertical=True, path=path)
-            )
-
-            positions_text.append(lines)
-
-            box = lines.envelope.buffer(BOX_SAFETY_MARGIN)
-            positions_boxes.append(box.envelope)
-
-            # labels += [path, lines, box.exterior]
-            debug_map_labels += [box.exterior]
-
-        cities.append(
-            {
-                "pos": p,
-                "label": label,
-                "population": population,
-                "priority": 1.0,
-                "error": None,
-                "circle": circle,
-                "boxes": positions_boxes,
-                "text": positions_text,
-                "region": None,
-            }
-        )
-
-        if len(cities) > 100:
-            break
-
-min_pop = FILTER_MIN_POPULATION
-max_pop = max([c["population"] for c in cities])
-
-for c in cities:
-    c["priority"] = (c["population"] - min_pop) / (max_pop - min_pop)
-
-# collision check
-
-cities_cleaned = []
-cities = list(reversed(sorted(cities, key=lambda c: c["population"])))
-tree = STRtree([c["pos"].buffer(CIRCLE_RADIUS * 2.5).envelope for c in cities])
-for i, c in enumerate(cities):
-    collisions = tree.query(c["pos"])
-    if min(collisions) < i:
-        # print(cities[min(collisions)]["label"], c["label"])
-        continue
-    cities_cleaned.append(c)
-
-logger.info(f"removed during collision checking: {len(cities)-len(cities_cleaned)}")
-
-cities = cities_cleaned
-
-# split cities into disjunct sets
-
-label_polygons = [shapely.ops.unary_union(c["boxes"]) for c in cities]
-tree = STRtree(label_polygons)
-
-regions = []
+@dataclass
+class City:
+    pos: Point
+    label: str
+    population: int
+    priority: float
+    error: float | None
+    circle: Polygon
+    boxes: list[Polygon]
+    text: list[MultiLineString]
+    region: int | None
+    placement: int | None  # position index of the best label placement
 
 
-def rec_propagate(city_index: int, region: int) -> None:
-    if cities[city_index]["region"] is not None:
-        return
-
-    cities[city_index]["region"] = region
-    regions[region].append(city_index)
-    for overlap_index in tree.query(label_polygons[city_index]):
-        rec_propagate(int(overlap_index), region)
-
-
-for i in range(len(cities)):
-    c = cities[i]
-
-    if c["region"] is not None:
-        continue
-
-    region_name = len(regions)
-    regions.append([])
-
-    rec_propagate(i, region_name)
-
-# annealing
-
-state = np.zeros([len(cities)], dtype=int)
-
-
-def fitness(cities_indices: list[int], s: np.ndarray) -> float:
-    tree_box = STRtree([cities[ci]["boxes"][s[i]] for i, ci in enumerate(cities_indices)])
-    tree_circle = STRtree([cities[ci]["circle"] for i, ci in enumerate(cities_indices)])
-
-    fit = 0
-
-    for i, ci in enumerate(cities_indices):
-        overlaps = tree_box.query(cities[ci]["boxes"][s[i]])
-        fit += (len(overlaps) - 1) * 100
-
-        overlaps = tree_circle.query(cities[ci]["boxes"][s[i]])
-        fit += len(overlaps) * 100
-
-        fit += position_errors[s[i]]
-
-        fit += fit * cities[ci]["priority"]
-
-    return fit
-
-
-def anneal(region: list[int]) -> list[int]:
+def _anneal(cities: list[City], region: list[int]):
     state = np.zeros([len(region)], dtype=int)
-    new_fit = np.zeros([len(region)], dtype=int)
-    fit = len(region) * 600
+    for i in range(state.shape[0]):
+        state[i] = random.randrange(8)
 
-    for i in range(100000):
+    error = np.full([len(region)], 1000, dtype=float)
+    new_error = np.full([len(region)], 0, dtype=float)
+
+    tree_circle = STRtree([cities[ci].circle for i, ci in enumerate(region)])
+
+    position_errors = [positions[key]["error"] for key in positions.keys()]
+
+    for _ in range(config.get("max_iterations", DEFAULT_MAX_ITERATIONS)):
         s = np.copy(state)
-        new_fit = np.zeros([len(region)], dtype=float)
+        new_error.fill(0)
 
-        for i in range(s.shape[0]):
-            s[i] = random.randrange(7)
+        s[random.randrange(s.shape[0])] = random.randrange(8)
 
-        tree_box = STRtree([cities[ci]["boxes"][s[i]] for i, ci in enumerate(region)])
-        tree_circle = STRtree([cities[ci]["circle"] for i, ci in enumerate(region)])
+        tree_box = STRtree([cities[ci].boxes[s[i]] for i, ci in enumerate(region)])
 
         for i, ci in enumerate(region):
-            overlaps = tree_box.query(cities[ci]["boxes"][s[i]])
-            new_fit[i] += (len(overlaps) - 1) * 100
+            overlaps = tree_box.query(cities[ci].boxes[s[i]])
+            new_error[i] += (len(overlaps) - 1) * 100
 
-            overlaps = tree_circle.query(cities[ci]["boxes"][s[i]])
-            new_fit[i] += len(overlaps) * 100
+            overlaps = tree_circle.query(cities[ci].boxes[s[i]])
+            new_error[i] += len(overlaps) * 100
 
-            new_fit[i] += position_errors[s[i]]
-            new_fit[i] += new_fit[i] * cities[ci]["priority"]
+            new_error[i] += position_errors[s[i]]
+            new_error[i] += new_error[i] * cities[ci].priority
 
-        if np.sum(new_fit) < fit:
+        if np.sum(new_error) < np.sum(error):
             state = s
-            fit = np.sum(new_fit)
+            error = new_error
 
-            for i, ci in enumerate(region):
-                cities[ci]["error"] = new_fit[i]
-
-        if fit < 10:
+        if np.sum(error) < 1:
             break
 
-    logger.debug(f"region (size {len(region)}) fitness {fit:6.2f}")
+    logger.debug(f"region (size {len(region):<3}) error {np.sum(error):6.2f} | {[cities[ci].label for ci in region]}")
 
-    return state.tolist()
+    for i, ci in enumerate(region):
+        cities[ci].error = error[i]
+        cities[ci].placement = state[i]
 
 
-for region in regions:
-    region_state = anneal(region)
+def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str, Any]) -> list[City]:
+    cities = []
 
-    for i in range(len(region_state)):
-        state[region[i]] = region_state[i]
+    debug_map_circles = []
+    debug_map_labels = []
 
-    break
+    project_func = document_info.get_projection_func(Projection.WGS84)
+    mat = document_info.get_transformation_matrix()
 
-# debug
+    font = HersheyFont()
+    filter_min_population = config.get("filter_min_population", DEFAULT_FILTER_MIN_POPULATION)
 
-for c in cities:
-    if c["error"] is None:
-        continue
-    print(f"{c["label"]} {c["error"]:>10.2f}")
+    with open(filename) as csvfile:
+        reader = csv.DictReader(csvfile, delimiter=";")
+        for row in reader:
+            population = int(row["population"])
+            if population < filter_min_population:
+                continue
 
-# output
+            lon = float(row["lon"])
+            lat = float(row["lat"])
+            label = row["ascii_name"]
 
-svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement.svg"), DOCUMENT_SIZE)
-options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
-svg.add("circles", [c["pos"].buffer(CIRCLE_RADIUS) for c in cities], options=options)
+            p = Point([lon, lat])
 
-placed_labels = []
-for i, c in enumerate(cities):
-    if c["error"] is None:
-        continue
-    placed_labels.append(c["text"][state[i]])
+            p = transform(project_func, p)
+            p = affine_transform(p, mat)
 
-svg.add("labels", placed_labels, options=options)
-svg.write()
+            circle = p.buffer(CIRCLE_RADIUS)
+            debug_map_circles.append(circle)
 
-# debug
+            positions_boxes = []
+            positions_text = []
+            for k in positions.keys():
+                sin = math.sin(math.radians(positions[k]["pos"]))
+                cos = math.cos(math.radians(positions[k]["pos"]))
 
-svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement_debug.svg"), DOCUMENT_SIZE)
-options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
-svg.add("circles", debug_map_circles, options=options)
-svg.add("labels", debug_map_labels, options=options)
-svg.write()
+                xnew = OFFSET_FROM_CENTER * cos - 0 * sin + p.x
+                ynew = OFFSET_FROM_CENTER * sin + 0 * cos + p.y
+
+                # TODO:
+                #  complex: backproject xnew, ynew to lat lon so we compute the baseline path for the font
+                #  simple: compute the baseline path only once for right and left and move it up and down to the different positions
+
+                path_coords = None
+                match positions[k]["align"]:
+                    case Align.LEFT:
+                        path_coords = [[lon, lat], [lon + 50, lat]]
+                    case Align.RIGHT:
+                        path_coords = [[lon - 50, lat], [lon, lat]]
+                    case Align.CENTER:
+                        path_coords = [[lon - 25, lat], [lon + 25, lat]]
+                    case _:
+                        raise Exception(f"unexpected enum state align: {positions[k]["align"]}")
+
+                path = LineString(path_coords).segmentize(0.1)
+                path = transform(project_func, path)
+                path = affine_transform(path, mat)
+                path = translate(path, xoff=xnew - p.x, yoff=ynew - p.y)
+                lines = MultiLineString(
+                    font.lines_for_text(label, FONT_SIZE, align=positions[k]["align"], center_vertical=True, path=path)
+                )
+
+                positions_text.append(lines)
+
+                box = lines.envelope.buffer(BOX_SAFETY_MARGIN)
+                positions_boxes.append(box.envelope)
+
+                debug_map_labels += [box.exterior]
+
+            cities.append(
+                City(
+                    pos=p,
+                    label=label,
+                    population=population,
+                    priority=1.0,
+                    error=None,
+                    circle=circle,
+                    boxes=positions_boxes,
+                    text=positions_text,
+                    region=None,
+                    placement=None,
+                )
+            )
+
+    return cities
+
+
+def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]:
+    min_pop = config.get("filter_min_population", DEFAULT_FILTER_MIN_POPULATION)
+    max_pop = max([c.population for c in cities])
+
+    for c in cities:
+        c.priority = (c.population - min_pop) / (max_pop - min_pop)
+
+    # collision check
+
+    cities_cleaned = []
+    cities = list(reversed(sorted(cities, key=lambda c: c.population)))
+    tree = STRtree([c.pos.buffer(CIRCLE_RADIUS * 2.5).envelope for c in cities])
+    for i, c in enumerate(cities):
+        collisions = tree.query(c.pos)
+        if min(collisions) < i:
+            continue
+        cities_cleaned.append(c)
+
+    logger.info(f"removed during collision checking: {len(cities)-len(cities_cleaned)}")
+
+    cities = cities_cleaned
+
+    # split cities into disjunct sets
+
+    label_polygons = [shapely.ops.unary_union(c.boxes) for c in cities]
+    tree = STRtree(label_polygons)
+
+    regions = []
+
+    def _rec_propagate(city_index: int, region: int) -> None:
+        if cities[city_index].region is not None:
+            return
+
+        cities[city_index].region = region
+        regions[region].append(city_index)
+        for overlap_index in tree.query(label_polygons[city_index]):
+            _rec_propagate(int(overlap_index), region)
+
+    for i in range(len(cities)):
+        c = cities[i]
+
+        if c.region is not None:
+            continue
+
+        region_name = len(regions)
+        regions.append([])
+
+        _rec_propagate(i, region_name)
+
+    # annealing
+
+    timer_start = datetime.datetime.now()
+    for region in regions:
+        _anneal(cities, region)
+
+    logger.info(f"anneal total time: {(datetime.datetime.now()-timer_start).total_seconds():5.2f}")
+
+    # remove collisions
+
+    cities_cleaned = []
+    for c in cities:
+        tree_box = STRtree([cc.boxes[cc.placement] for cc in cities_cleaned])
+        tree_circle = STRtree([cc.circle for cc in cities_cleaned])
+
+        box = c.boxes[c.placement]
+        circle = c.circle
+        overlap = tree_box.query(box).tolist() + tree_box.query(circle).tolist() + tree_circle.query(box).tolist()
+
+        if len(overlap) == 0:
+            cities_cleaned.append(c)
+        else:
+            logger.debug(f"drop city: {c.label}")
+
+    cities = cities_cleaned
+
+    ## debug
+    # for c in cities:
+    #     if c["error"] is None:
+    #         continue
+    #     print(f"{c["label"]} {c["error"]:>10.2f}")
+
+    return cities
+
+
+if __name__ == "__main__":
+    INPUT_FILE = Path("data/cities2/cities.csv")
+    OUTPUT_PATH = Path("experiments/labelplacement/output")
+
+    config = lineworld.get_config()
+
+    cities = read_from_file(INPUT_FILE, maptools.DocumentInfo({}))
+    cities = generate_placement(cities, config)
+
+    svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement.svg"), DOCUMENT_SIZE)
+    options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
+    svg.add("circles", [c.pos.buffer(CIRCLE_RADIUS) for c in cities], options=options)
+
+    placed_labels = []
+    for i, c in enumerate(cities):
+        if c.error is None:
+            continue
+        placed_labels.append(c.text[c.placement])
+
+    svg.add("labels", placed_labels, options=options)
+    svg.write()
+
+    # debug
+
+    # svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement_debug.svg"), DOCUMENT_SIZE)
+    # options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
+    # svg.add("circles", debug_map_circles, options=options)
+    # svg.add("labels", debug_map_labels, options=options)
+    # svg.write()
