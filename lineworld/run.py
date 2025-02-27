@@ -13,7 +13,7 @@ from core import maptools
 from layers import contour
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities2
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities
 from lineworld.util.export import convert_svg_to_png
 
 
@@ -48,9 +48,6 @@ def run() -> None:
     layer_cities_labels = cities.CitiesLabels("CitiesLabels", engine, config)
     layer_cities_circles = cities.CitiesCircles("CitiesCircles", engine, config)
 
-    layer_cities2_labels = cities2.CitiesLabels("CitiesLabels", engine, config)
-    layer_cities2_circles = cities2.CitiesCircles("CitiesCircles", engine, config)
-
     layer_labels = labels.Labels("Labels", engine, config)
 
     compute_layers = [
@@ -60,8 +57,6 @@ def run() -> None:
         # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
-        # layer_cities2_labels,
-        # layer_cities2_circles,
         # layer_labels,
         # layer_grid_bathymetry,
         # layer_grid_labels
@@ -100,12 +95,10 @@ def run() -> None:
     # pr.dump_stats('profile.pstat')
 
     visible_layers = [
-        # layer_cities_labels,
-        # layer_cities_circles,
-        # layer_cities2_labels,
-        # layer_cities2_circles,
+        layer_cities_labels,
+        layer_cities_circles,
         layer_grid_labels,
-        layer_labels,
+        # layer_labels,
         layer_coastlines,
         # layer_contour,
         layer_grid_bathymetry,
