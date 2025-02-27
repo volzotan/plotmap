@@ -36,6 +36,7 @@ class DocumentInfo:
         self.offset_x = config.get("offset_x", 0)
         self.offset_y = config.get("offset_y", 0)
 
+
     def get_transformation_matrix(self) -> list[float]:
         """world space to map space"""
 
@@ -83,6 +84,9 @@ class DocumentInfo:
         d = 0
         e = 1
         return [a, b, d, e, xoff, yoff]
+
+    def get_document_size(self) -> tuple[int, int]:
+        return (self.width, self.height)
 
     def get_viewport(self) -> Polygon:
         if self.config.get("debug", False):

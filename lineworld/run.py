@@ -130,7 +130,7 @@ def run() -> None:
     if not svg_filename.endswith(".svg"):
         svg_filename += ".svg"
 
-    svg = SvgWriter(svg_filename, [document_info.width, document_info.height])
+    svg = SvgWriter(svg_filename, document_info.get_document_size())
     svg.background_color = "white"
 
     # options_bathymetry = {

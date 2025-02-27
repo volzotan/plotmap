@@ -22,10 +22,10 @@ from loguru import logger
 
 DEFAULT_MAX_ITERATIONS = 10_000
 
-FONT_SIZE = 5
-OFFSET_FROM_CENTER = 5
-CIRCLE_RADIUS = 1.5
-BOX_SAFETY_MARGIN = 1.0
+DEFAULT_FONT_SIZE = 5
+DEFAULT_OFFSET_FROM_CENTER = 5
+DEFAULT_CIRCLE_RADIUS = 1.5
+DEFAULT_BOX_SAFETY_MARGIN = 1.0
 
 DEFAULT_FILTER_MIN_POPULATION = 1_000_000
 
@@ -55,7 +55,7 @@ class City:
     placement: int | None  # position index of the best label placement
 
 
-def _anneal(cities: list[City], region: list[int]):
+def _anneal(cities: list[City], region: list[int], config: dict[str, Any]):
     state = np.zeros([len(region)], dtype=int)
     for i in range(state.shape[0]):
         state[i] = random.randrange(8)
@@ -121,13 +121,14 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
             lon = float(row["lon"])
             lat = float(row["lat"])
             label = row["ascii_name"]
+            font_size = config.get("font_size", DEFAULT_FONT_SIZE)
 
             p = Point([lon, lat])
 
             p = transform(project_func, p)
             p = affine_transform(p, mat)
 
-            circle = p.buffer(CIRCLE_RADIUS)
+            circle = p.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS))
             debug_map_circles.append(circle)
 
             positions_boxes = []
@@ -136,8 +137,10 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                 sin = math.sin(math.radians(positions[k]["pos"]))
                 cos = math.cos(math.radians(positions[k]["pos"]))
 
-                xnew = OFFSET_FROM_CENTER * cos - 0 * sin + p.x
-                ynew = OFFSET_FROM_CENTER * sin + 0 * cos + p.y
+                offset = config.get("offset_from_center", DEFAULT_OFFSET_FROM_CENTER)
+
+                xnew = offset * cos - 0 * sin + p.x
+                ynew = offset * sin + 0 * cos + p.y
 
                 # TODO:
                 #  complex: backproject xnew, ynew to lat lon so we compute the baseline path for the font
@@ -159,12 +162,18 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                 path = affine_transform(path, mat)
                 path = translate(path, xoff=xnew - p.x, yoff=ynew - p.y)
                 lines = MultiLineString(
-                    font.lines_for_text(label, FONT_SIZE, align=positions[k]["align"], center_vertical=True, path=path)
+                    font.lines_for_text(
+                        label,
+                        font_size,
+                        align=positions[k]["align"],
+                        center_vertical=True,
+                        path=path
+                    )
                 )
 
                 positions_text.append(lines)
 
-                box = lines.envelope.buffer(BOX_SAFETY_MARGIN)
+                box = lines.envelope.buffer(config.get("box_safety_margin", DEFAULT_BOX_SAFETY_MARGIN))
                 positions_boxes.append(box.envelope)
 
                 debug_map_labels += [box.exterior]
@@ -198,7 +207,7 @@ def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]
 
     cities_cleaned = []
     cities = list(reversed(sorted(cities, key=lambda c: c.population)))
-    tree = STRtree([c.pos.buffer(CIRCLE_RADIUS * 2.5).envelope for c in cities])
+    tree = STRtree([c.pos.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS) * 2.5).envelope for c in cities])
     for i, c in enumerate(cities):
         collisions = tree.query(c.pos)
         if min(collisions) < i:
@@ -240,7 +249,7 @@ def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]
 
     timer_start = datetime.datetime.now()
     for region in regions:
-        _anneal(cities, region)
+        _anneal(cities, region, config)
 
     logger.info(f"anneal total time: {(datetime.datetime.now()-timer_start).total_seconds():5.2f}")
 
@@ -276,13 +285,14 @@ if __name__ == "__main__":
     OUTPUT_PATH = Path("experiments/labelplacement/output")
 
     config = lineworld.get_config()
+    document_info = maptools.DocumentInfo(config)
 
-    cities = read_from_file(INPUT_FILE, maptools.DocumentInfo({}))
+    cities = read_from_file(INPUT_FILE, document_info, config)
     cities = generate_placement(cities, config)
 
-    svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement.svg"), DOCUMENT_SIZE)
+    svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement.svg"), document_info.get_document_size())
     options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
-    svg.add("circles", [c.pos.buffer(CIRCLE_RADIUS) for c in cities], options=options)
+    svg.add("circles", [c.pos.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS)) for c in cities], options=options)
 
     placed_labels = []
     for i, c in enumerate(cities):

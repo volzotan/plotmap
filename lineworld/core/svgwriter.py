@@ -12,9 +12,9 @@ class SvgWriter:
     layers: dict[str, list[tuple[Geometry, SvgOptions]]]
     styles: dict[str, SvgOptions]
 
-    def __init__(self, filename: Path | str, dimensions: list[float]):
+    def __init__(self, filename: Path | str, dimensions: tuple[int, int]):
         self.filename: Path = Path(filename)
-        self.dimensions: list[int | float] = dimensions
+        self.dimensions: tuple[int, int] = dimensions
         self.image: str | None = None
         self.background_color: str | None = None
         self.offset: list[int | float] = [0, 0]
