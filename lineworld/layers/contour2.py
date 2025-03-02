@@ -1,21 +1,30 @@
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import rasterio
 import shapely
 from core.maptools import DocumentInfo
 import geoalchemy2
 from geoalchemy2 import WKBElement
-from geoalchemy2.shape import to_shape
-from layers.elevation import ElevationLayer
+from geoalchemy2.shape import to_shape, from_shape
+from shapely import to_wkt
 from shapely.geometry import Polygon, MultiLineString, LineString, MultiPolygon
 from sqlalchemy import Table, Column, Integer, Float, ForeignKey
 from sqlalchemy import engine, MetaData
 from sqlalchemy import select
 from sqlalchemy import text
+from sqlalchemy import insert
 
+from lineworld.core.maptools import Projection
 from lineworld.layers.elevation import ElevationMapPolygon
 from lineworld.layers.layer import Layer
+from lineworld.util import gebco_grid_to_polygon
+from lineworld.util.geometrytools import unpack_multipolygon, process_polygons
+
+from loguru import logger
 
 
 @dataclass
@@ -73,22 +82,30 @@ class Contour2(Layer):
     """
     Layer: Contour and Bathymetry (below sea-level elevation data)
     Projection Info: GEBCO data is WGS84 - Mercator (EPSG 4326)
+
+    The Contour2 layer does not store the data from GEBCO files (WGS84) in the database
+    (when transform_to_world() is invoked) but does project the GEBCO image directly
+    to the map projection system. The ContourWorldPolygon dataclass is only used within the
+    transform_to_map() method.
+
+    This was necessary because performing the smoothing on the (correctly projected) DEM image
+    is considerably easier than trying to do smoothing on the contour lines derived from the
+    DEM in WGS84 and then converted to the map projection.
+
     """
 
     DEFAULT_DATA_URL = "https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/geotiff/"
     DATA_SRID = Projection.WGS84
 
-    DEFAULT_LAYER_NAME = "Elevation"
+    DEFAULT_LAYER_NAME = "Contour2"
 
-    GEOTIFF_SCALING_FACTOR = 0.5
-    # minimal area of polygons on a WGS84 geoid in m^2
-    FILTER_POLYGON_MIN_AREA_WGS84 = 1e5
-    # minimal area of polygons on the map (in map units, mm^2)
-    FILTER_POLYGON_MIN_AREA_MAP = 1.0
-    # simplification tolerance in WGS84 latlon, resolution: 1°=111.32km (equator worst case)
-    LAT_LON_PRECISION = 0.01
-    LAT_LON_MIN_SEGMENT_LENGTH = 0.1
-    WRAPOVER_LONGITUDE_EXTENSION = 60
+    DEFAULT_GEOTIFF_SCALING_FACTOR = 0.5
+
+    FILTER_POLYGON_MIN_AREA_MAP = 10
+
+    DEFAULT_WINDOW_SIZE_TPI = 51
+    DEFAULT_WINDOW_SIZE_SMOOTHING_LOW = 251
+    DEFAULT_WINDOW_SIZE_SMOOTHING_HIGH = 501
 
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
@@ -101,6 +118,7 @@ class Contour2(Layer):
         self.tiles_dir = Path(self.data_dir, "tiles")
         self.scaled_dir = Path(self.data_dir, "scaled")
         self.mosaic_file = Path(self.data_dir, "gebco_mosaic.tif")
+        self.projected_file = Path(self.data_dir, "projected_mosaic.tif")
 
         if not self.data_dir.exists():
             os.makedirs(self.data_dir)
@@ -164,213 +182,131 @@ class Contour2(Layer):
 
         dataset_files = [f for f in self.tiles_dir.iterdir() if f.is_file() and f.suffix == ".tif"]
         if len(dataset_files) == 0:
-            logger.warning("no GeoTiffs to transform")
+            logger.error("no GeoTiffs to transform")
+            return
 
         scaled_files = []
-        for dataset_file in dataset_files:
-            scaled_path = Path(self.scaled_dir, dataset_file.name)
-            scaled_files.append(scaled_path)
+        scaling_factor = self.config.get("geotiff_scaling_factor", self.DEFAULT_GEOTIFF_SCALING_FACTOR)
+        if scaling_factor == 1:
+            scaled_files = dataset_files
+        else:
+            for dataset_file in dataset_files:
+                scaled_path = Path(self.scaled_dir, dataset_file.name)
+                scaled_files.append(scaled_path)
 
-            if scaled_path.exists():
-                continue
+                if scaled_path.exists():
+                    continue
 
-            logger.debug(f"downscaling tile: {dataset_file}")
-            gebco_grid_to_polygon.downscale_and_write(dataset_file, scaled_path, self.GEOTIFF_SCALING_FACTOR)
+                logger.debug(f"downscaling tile: {dataset_file}")
+                gebco_grid_to_polygon.downscale_and_write(dataset_file, scaled_path, scaling_factor)
 
         # Merging tiles into a mosaic
         if not self.mosaic_file.exists():
             logger.debug("merging mosaic tiles")
             gebco_grid_to_polygon.merge_and_write(scaled_files, self.mosaic_file)
 
-        # TODO: do the reproject so DEM smoothing can happen with the correct projection
+    def transform_to_world(self) -> list[ContourWorldPolygon]:
+        return []
 
-    def transform_to_world(self) -> list[ElevationWorldPolygon]:
-        """
-        Transform GEBCO geoTiff raster image data to shapely polygons on layers with fixed min-max elevations
-        """
-
+    def transform_to_map(self, document_info: DocumentInfo) -> list[ContourMapPolygon]:
         if not self.mosaic_file.exists():
             raise Exception(f"Gebco mosaic GeoTiff {self.mosaic_file} not found")
+
+        if not self.projected_file.exists():
+            logger.debug("projecting mosaic")
+            gebco_grid_to_polygon.project(self.mosaic_file, self.projected_file)
+        # TODO: do the reproject so DEM smoothing can happen with the correct projection
 
         if "elevation_anchors" not in self.config:
             logger.warning(
                 f'configuration "elevation_anchors" missing for layer {self.layer_id}, fallback to default values'
             )
 
-        polygons: list[ElevationWorldPolygon] = []
+        worldPolygons: list[ContourWorldPolygon] = []
         layer_elevation_bounds = gebco_grid_to_polygon.get_elevation_bounds(
-            self.config.get("elevation_anchors", [0, 10000]),
+            self.config.get("elevation_anchors", [0, 10_000]),
             self.config.get("num_elevation_lines", 10),
         )
         logger.debug(
             f"computed elevation line bounds: {[int(layer_elevation_bounds[0][0])] + [int(x[1]) for x in layer_elevation_bounds]}"
         )
 
-        for dataset_file in [self.mosaic_file]:
+        for dataset_file in [self.projected_file]:
             logger.info(f"converting raster data to elevation contour polygons: {dataset_file})")
 
-            converted_layers = gebco_grid_to_polygon.convert(dataset_file, layer_elevation_bounds, allow_overlap=True)
+            with rasterio.open(dataset_file) as dataset:
+                band = dataset.read(1)
 
-            for layer_index in range(len(converted_layers)):
-                # TODO: do I really want to simplify already in world space?
-
-                polys = process_polygons(
-                    converted_layers[layer_index],
-                    simplify_precision=self.LAT_LON_PRECISION,
-                    # min_area_wgs84=self.FILTER_POLYGON_MIN_AREA_WGS84, # warning, may incorrectly filter very large/complex polygons
-                    check_empty=True,
-                    check_valid=True,
-                    unpack=True,
+                band_smoothed = gebco_grid_to_polygon._adaptive_smoothing(
+                    band,
+                    self.config.get("window_size_tpi", self.DEFAULT_WINDOW_SIZE_TPI),
+                    self.config.get("window_size_smoothing_low", self.DEFAULT_WINDOW_SIZE_SMOOTHING_LOW),
+                    self.config.get("window_size_smoothing_high", self.DEFAULT_WINDOW_SIZE_SMOOTHING_HIGH),
                 )
 
-                polygons += [
-                    ElevationWorldPolygon(
-                        None,
-                        layer_index,
-                        layer_elevation_bounds[layer_index][0],
-                        layer_elevation_bounds[layer_index][1],
-                        polys[i],
+                del band
+
+                converted_layers = gebco_grid_to_polygon.convert(
+                    dataset, band_smoothed, layer_elevation_bounds, allow_overlap=True
+                )
+
+                for i, layer in enumerate(converted_layers):
+                    polys = process_polygons(
+                        layer,
+                        check_empty=True,
+                        check_valid=True,
+                        unpack=True,
                     )
-                    for i in range(polys.shape[0])
-                ]
 
-        return polygons
+                    worldPolygons += [
+                        ContourWorldPolygon(
+                            None,
+                            i,
+                            layer_elevation_bounds[i][0],
+                            layer_elevation_bounds[i][1],
+                            p,
+                        )
+                        for p in polys
+                    ]
 
-    def transform_to_map(self, document_info: DocumentInfo, allow_overlap: bool = False) -> list[ElevationMapPolygon]:
-        with self.db.begin() as conn:
-            params = {
-                "srid": document_info.projection.value[1],
-                "min_area": self.FILTER_POLYGON_MIN_AREA_WGS84,
-            }
+        # convert from target projection to map space
+        mat = document_info.get_transformation_matrix()
+        polys = [shapely.affinity.affine_transform(wp.polygon, mat) for wp in worldPolygons]
 
-            result_center = conn.execute(
-                text(f"""
-                SELECT  id,
-                        elevation_level,
-                        polygon AS poly
-                FROM {self.world_polygon_table.fullname}
-                WHERE ST_Area(polygon) >= :min_area
-            """),
-                params,
-            )
+        polys = process_polygons(
+            polys,
+            simplify_precision=self.config.get("tolerance", 0.1),
+            check_valid=True,
+        )
 
-            results = result_center.all()
+        layers: dict[int, list[ContourMapPolygon]] = {}
+        for i in range(polys.shape[0]):
+            geoms = np.array(unpack_multipolygon(polys[i]))
 
-            polygons = [to_shape(WKBElement(x.poly)) for x in results]
+            geoms = geoms[~shapely.is_empty(geoms)]
 
-            if document_info.wrapover:
-                select_slice = text(f"""
-                    SELECT  id,
-                            elevation_level,
-                            ST_MakeValid(ST_Intersection(
-                                polygon,
-                                ST_GeogFromText(:viewport)
-                            ) ::geometry) AS poly
-                    FROM {self.world_polygon_table.fullname}
-                    WHERE ST_Area(polygon) >= :min_area
-                """)
+            mask_small = shapely.area(geoms) < self.FILTER_POLYGON_MIN_AREA_MAP
+            geoms = geoms[~mask_small]
 
-                result_right = conn.execute(
-                    select_slice,
-                    {
-                        **params,
-                        "viewport": to_wkt(shapely.box(-180, 85, -180 + self.WRAPOVER_LONGITUDE_EXTENSION, -85)),
-                    },
-                ).all()
+            layer_number = worldPolygons[i].elevation_level
+            if layer_number not in layers:
+                layers[layer_number] = []
 
-                result_left = conn.execute(
-                    select_slice,
-                    {
-                        **params,
-                        "viewport": to_wkt(shapely.box(180 - self.WRAPOVER_LONGITUDE_EXTENSION, 85, 180, -85)),
-                    },
-                ).all()
+            for j in range(geoms.shape[0]):
+                g = geoms[j]
 
-                polygons_right = [translate(to_shape(WKBElement(x.poly)), xoff=360) for x in result_right]
-                polygons_left = [translate(to_shape(WKBElement(x.poly)), xoff=-360) for x in result_left]
+                layers[layer_number].append(ContourMapPolygon(None, worldPolygons[i].id, g))
 
-                polygons = polygons + polygons_left + polygons_right
-                results = results + result_right + result_left
+        return [x for k, v in layers.items() for x in v]
 
-            polys = np.array(polygons, dtype=Polygon)
-
-            logger.debug(f"project: loaded polygons: {polys.shape[0]}")
-
-            if self.LAT_LON_MIN_SEGMENT_LENGTH is not None:
-                polys = shapely.segmentize(polys, self.LAT_LON_MIN_SEGMENT_LENGTH)
-
-            # from WGS to target projection
-            func = document_info.get_projection_func(self.DATA_SRID)
-            polys = polys.tolist()
-            polys = [shapely.ops.transform(func, p) for p in polys]
-
-            # from target projection to map space
-            mat = document_info.get_transformation_matrix()
-            polys = [affine_transform(p, mat) for p in polys]
-
-            polys = process_polygons(
-                polys,
-                simplify_precision=self.config.get("tolerance", 0.1),
-                check_valid=True,
-            )
-
-            layers: dict[int, list[ElevationMapPolygon]] = {}
-            for i in range(polys.shape[0]):
-                geoms = np.array(unpack_multipolygon(polys[i]))
-
-                geoms = geoms[~shapely.is_empty(geoms)]
-
-                mask_small = shapely.area(geoms) < self.FILTER_POLYGON_MIN_AREA_MAP
-                geoms = geoms[~mask_small]
-
-                layer_number = results[i].elevation_level
-                if layer_number not in layers:
-                    layers[layer_number] = []
-
-                for j in range(geoms.shape[0]):
-                    g = geoms[j]
-
-                    layers[layer_number].append(ElevationMapPolygon(None, results[i].id, g))
-
-            if allow_overlap:
-                return [x for k, v in layers.items() for x in v]
-            else:
-                return self._cut_layers(layers)
-
-    def _cut_layers(self, layers: dict[int, list[ElevationMapPolygon]]) -> list[ElevationMapPolygon]:
-        num_layers = max(layers.keys()) + 1
-
-        result_list = []
-
-        cutting_polygon = MultiPolygon()
-        for i in reversed(range(num_layers)):
-            current_layer_polygon = shapely.unary_union(np.array([p.polygon for p in layers[i]], dtype=Polygon))
-
-            current_layer_polygon.buffer(0.1)
-
-            cutting_polygon_new = shapely.union(cutting_polygon, current_layer_polygon)
-
-            for emp in layers[i]:
-                new_geometry = shapely.difference(emp.polygon, cutting_polygon)
-                for g in unpack_multipolygon(new_geometry):
-                    if g.is_empty:
-                        continue
-
-                    result_list.append(ElevationMapPolygon(None, emp.world_polygon_id, g))
-
-            cutting_polygon = cutting_polygon_new
-
-        return result_list
-
-    def transform_to_lines(self, document_info: DocumentInfo) -> list[ElevationMapLines]:
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[ContourMapLines]:
         with self.db.begin() as conn:
             # for some reason it's faster to not use WHERE NOT ST_IsEmpty(poly) in the SQL command
 
             result = conn.execute(
                 text(f"""
-                SELECT  mp.id, wp.elevation_level, mp.polygon AS poly, ST_Envelope(mp.polygon) AS bbox
-                FROM    {self.map_polygon_table} AS mp JOIN 
-                        {self.world_polygon_table} AS wp ON mp.world_polygon_id = wp.id
+                SELECT  mp.id, mp.polygon AS poly, ST_Envelope(mp.polygon) AS bbox
+                FROM    {self.map_polygon_table} AS mp
                 """)
             )
 
@@ -384,11 +320,11 @@ class Contour2(Layer):
 
             processed_elevationPolygonLines = []
             for i in range(polys.shape[0]):
-                for mline in self._style(polys[i], results[i].elevation_level, document_info, bbox=bboxes[i]):
+                for mline in self._style(polys[i], document_info, bbox=bboxes[i]):
                     if mline.is_empty:
                         continue
 
-                    el = ElevationMapLines(None, results[i].id, mline)
+                    el = ContourMapLines(None, results[i].id, mline)
                     processed_elevationPolygonLines.append(el)
 
         # if len(processed_elevationPolygonLines) > 0:
@@ -412,7 +348,7 @@ class Contour2(Layer):
             logger.info(f"loading geometries: {len(geometries)}")
 
         match geometries[0]:
-            case ElevationWorldPolygon():
+            case ContourWorldPolygon():
                 with self.db.begin() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {self.world_polygon_table.fullname} CASCADE"))
                     conn.execute(
@@ -420,12 +356,12 @@ class Contour2(Layer):
                         [g.todict() for g in geometries],
                     )
 
-            case ElevationMapPolygon():
+            case ContourMapPolygon():
                 with self.db.begin() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {self.map_polygon_table.fullname} CASCADE"))
                     conn.execute(insert(self.map_polygon_table), [g.todict() for g in geometries])
 
-            case ElevationMapLines():
+            case ContourMapLines():
                 with self.db.begin() as conn:
                     conn.execute(text(f"TRUNCATE TABLE {self.map_lines_table.fullname} CASCADE"))
                     conn.execute(insert(self.map_lines_table), [g.todict() for g in geometries])
@@ -436,7 +372,6 @@ class Contour2(Layer):
     def _style(
         self,
         p: Polygon,
-        elevation_level: int,
         document_info: DocumentInfo,
         bbox: Polygon | None = None,
     ) -> list[MultiLineString]:
