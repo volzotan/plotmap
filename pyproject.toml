@@ -22,6 +22,7 @@ dependencies = [
     "requests>=2.32.3",
     "ruff>=0.6.9",
     "shapely>=2.0.6",
+    "shapelysmooth>=0.2.1",
     "svgpathtools>=1.6.1",
     "tifffile>=2024.12.12",
     "toml>=0.10.2",

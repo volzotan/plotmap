@@ -2,7 +2,6 @@ import argparse
 import cProfile as profile
 import datetime
 
-import fire
 import numpy as np
 from loguru import logger
 from shapely.geometry import MultiPolygon
@@ -13,7 +12,7 @@ from core import maptools
 from layers import contour
 from lineworld.core.maptools import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities, contour2
 from lineworld.util.export import convert_svg_to_png
 
 
@@ -42,6 +41,7 @@ def run() -> None:
     )
     layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry", engine, config)
     layer_contour = contour.Contour("Contour", engine, config)
+    layer_contour2 = contour2.Contour2("Contour2", engine, config)
 
     layer_coastlines = coastlines.Coastlines("Coastlines", engine, config)
 
@@ -51,15 +51,16 @@ def run() -> None:
     layer_labels = labels.Labels("Labels", engine, config)
 
     compute_layers = [
-        # layer_bathymetry,
-        # layer_bathymetry2,
-        # layer_contour,
+        layer_bathymetry,
+        # layer_contour2,
         # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
         # layer_labels,
         # layer_grid_bathymetry,
-        # layer_grid_labels
+        # layer_grid_labels,
+        # layer_bathymetry2,
+        # layer_contour,
     ]
 
     for layer in compute_layers:
@@ -95,14 +96,15 @@ def run() -> None:
     # pr.dump_stats('profile.pstat')
 
     visible_layers = [
-        layer_cities_labels,
-        layer_cities_circles,
-        layer_grid_labels,
+        # layer_cities_labels,
+        # layer_cities_circles,
+        # layer_grid_labels,
         # layer_labels,
-        layer_coastlines,
-        # layer_contour,
-        layer_grid_bathymetry,
+        # layer_coastlines,
+        # layer_contour2,
+        # layer_grid_bathymetry,
         layer_bathymetry,
+        # layer_contour,
         # layer_bathymetry2,
     ]
 
@@ -161,8 +163,6 @@ def run() -> None:
         "fill-opacity": "0.1",
     }
 
-    layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
-
     layer_styles[layer_contour.layer_id] = {
         "fill": "none",
         "stroke": "black",
@@ -190,13 +190,13 @@ def run() -> None:
     layer_styles[layer_cities_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "1.0",
+        "stroke-width": "0.5",
     }
 
     layer_styles[layer_cities_circles.layer_id] = {
         "fill": "none",
         "stroke": "red",
-        "stroke-width": "1.0",
+        "stroke-width": "0.5",
     }
 
     layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
@@ -216,7 +216,7 @@ def run() -> None:
     svg.add(
         "Contours2_High",
         layer_contour2.out_tanaka([], document_info, highlights=True)[0],
-        {**tanaka_style, "stroke": "rgba(120, 120, 120, 1.0)"},
+        {**tanaka_style, "stroke": "#999999"},
     )
     svg.add(
         "Contours2_Low",

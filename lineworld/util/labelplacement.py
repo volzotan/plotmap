@@ -162,13 +162,7 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                 path = affine_transform(path, mat)
                 path = translate(path, xoff=xnew - p.x, yoff=ynew - p.y)
                 lines = MultiLineString(
-                    font.lines_for_text(
-                        label,
-                        font_size,
-                        align=positions[k]["align"],
-                        center_vertical=True,
-                        path=path
-                    )
+                    font.lines_for_text(label, font_size, align=positions[k]["align"], center_vertical=True, path=path)
                 )
 
                 positions_text.append(lines)
@@ -292,7 +286,9 @@ if __name__ == "__main__":
 
     svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement.svg"), document_info.get_document_size())
     options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
-    svg.add("circles", [c.pos.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS)) for c in cities], options=options)
+    svg.add(
+        "circles", [c.pos.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS)) for c in cities], options=options
+    )
 
     placed_labels = []
     for i, c in enumerate(cities):

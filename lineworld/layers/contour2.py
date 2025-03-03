@@ -322,13 +322,11 @@ class Contour2(Layer):
 
             processed_elevationPolygonLines = []
             for i, poly in enumerate(polys):
-
                 poly = poly.segmentize(1.0)
                 poly = taubin_smooth(poly, steps=self.config.get("taubin_smoothing_steps", 5))
                 poly = poly.simplify(self.config.get("tolerance", 0.1))
 
                 for g in unpack_multipolygon(poly):
-
                     if g.is_empty:
                         continue
 

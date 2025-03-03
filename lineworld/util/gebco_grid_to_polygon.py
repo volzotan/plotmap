@@ -286,6 +286,10 @@ def _calculate_topographic_position_index(data: np.ndarray, window_size: int) ->
     """Simplified version of the Topographic Position Index
     See: "Weiss, A., 2001. Topographic Position and Landforms Analysis"
     """
+
+    if window_size % 2 != 1:
+        logger.warning("window size is not an odd number, resulting TPI will be skewed")
+
     data_positive = (data - np.min(data)).astype(float)
     kernel = np.ones([window_size, window_size], dtype=float)
     kernel[kernel.shape[0] // 2, kernel.shape[1] // 2] = 0

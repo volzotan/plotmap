@@ -93,7 +93,6 @@ class Cities(Layer):
         pass
 
     def transform_to_lines(self, document_info: DocumentInfo) -> list[CitiesLines]:
-
         lines = []
 
         cities = labelplacement.read_from_file(self.cities_file, document_info, self.config)
