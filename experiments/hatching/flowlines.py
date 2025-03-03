@@ -637,8 +637,6 @@ class FlowlineHatcher:
                 starting_points.append([i, j])
 
         for i in range(self.MAX_ITERATIONS):
-            # if len(starting_points) % 1000 == 0:
-            #     print(f"{len(starting_points_priority)} {len(starting_points)} {len(linestrings)}")
 
             if i >= self.MAX_ITERATIONS - 1:
                 if len(self.tile_name) > 0:
@@ -648,9 +646,6 @@ class FlowlineHatcher:
 
             if len(starting_points) == 0:
                 break
-
-            # if len(starting_points) % 100 == 0:
-            #     print(f"{len(starting_points)} | {len(linestrings)}")
 
             seed = None
             if len(starting_points_priority) > 0:

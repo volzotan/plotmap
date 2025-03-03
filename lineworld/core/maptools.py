@@ -36,7 +36,6 @@ class DocumentInfo:
         self.offset_x = config.get("offset_x", 0)
         self.offset_y = config.get("offset_y", 0)
 
-
     def get_transformation_matrix(self) -> list[float]:
         """world space to map space"""
 

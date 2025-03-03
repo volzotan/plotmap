@@ -12,6 +12,7 @@ from core.maptools import DocumentInfo, Projection
 from geoalchemy2.shape import to_shape, from_shape
 from layers.layer import Layer
 from loguru import logger
+from scipy import ndimage
 from shapely import Polygon, MultiLineString, STRtree
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
@@ -30,6 +31,8 @@ from rasterio.warp import (
 import lineworld
 from experiments.hatching import flowlines
 from experiments.hatching.flowlines import FlowlineTiler, FlowlineTilerPoly
+from lineworld.util.gebco_grid_to_polygon import _calculate_topographic_position_index
+from lineworld.util.rastertools import normalize_to_uint8
 
 
 @dataclass
@@ -164,22 +167,40 @@ class BathymetryFlowlines(Layer):
 
         data = cv2.resize(data, [document_info.width * 10, document_info.width * 10])  # TODO
 
+        flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
+
         density = None
         try:
             # use uint8 for the density map to save some memory and 256 values will be enough precision
             density = cv2.imread(str(self.density_file), cv2.IMREAD_GRAYSCALE)
-            density = (np.iinfo(np.uint8).max * ((density - np.min(density)) / np.ptp(density))).astype(np.uint8)
+            density = normalize_to_uint8(density)
             density = cv2.resize(density, data.shape)
 
             # 50:50 blend of elevation data and externally computed density image
-            data_normalized = (np.iinfo(np.uint8).max * ((data - np.min(data)) / np.ptp(data))).astype(np.uint8)
+            data_normalized = normalize_to_uint8(data)
 
             density = np.mean(np.dstack([density, data_normalized]), axis=2).astype(np.uint8)
 
         except Exception as e:
             logger.error(e)
 
-        flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
+        # MAX_TPI = 1_000
+        # tpi = _calculate_topographic_position_index(data, 401)
+        # tpi = np.clip(np.abs(tpi), 0, MAX_TPI)
+        # normalized_tpi = normalize_to_uint8(tpi)
+
+        WINDOW_SIZE = 25
+        MAX_WIN_VAR = 40000
+        win_mean = ndimage.uniform_filter(data.astype(float), (WINDOW_SIZE, WINDOW_SIZE))
+        win_sqr_mean = ndimage.uniform_filter(data.astype(float) ** 2, (WINDOW_SIZE, WINDOW_SIZE))
+        win_var = win_sqr_mean - win_mean**2
+        win_var = np.clip(win_var, 0, MAX_WIN_VAR)
+        win_var = win_var * -1 + MAX_WIN_VAR
+        win_var = (np.iinfo(np.uint8).max * ((win_var - np.min(win_var)) / np.ptp(win_var))).astype(np.uint8)
+
+        mappings = np.zeros([data.shape[0], data.shape[1], 2], dtype=np.uint8)
+        mappings[:, :, flowlines.MAPPING_DISTANCE] = density[:, :]
+        mappings[:, :, flowlines.MAPPING_MAX_SEGMENTS] = win_var[:, :]
 
         tiler = None
         if self.tile_boundaries is not None and len(self.tile_boundaries) > 0:
@@ -187,11 +208,11 @@ class BathymetryFlowlines(Layer):
             mat = document_info.get_transformation_matrix_map_to_raster(data.shape[1], data.shape[0])
             raster_tile_boundaries = [affine_transform(boundary, mat) for boundary in self.tile_boundaries]
 
-            tiler = FlowlineTilerPoly(data, density, flow_config, raster_tile_boundaries)
+            tiler = FlowlineTilerPoly(data, mappings, flow_config, raster_tile_boundaries)
         else:
             tiler = FlowlineTiler(
                 data,
-                density,
+                mappings,
                 flow_config,
                 (self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)),
             )
