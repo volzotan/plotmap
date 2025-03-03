@@ -199,11 +199,30 @@ def run() -> None:
         "stroke-width": "1.0",
     }
 
+    layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
+    layer_styles[layer_contour2.layer_id] = layer_styles[layer_contour.layer_id]
+
     for k, v in layer_styles.items():
         svg.add_style(k, v)
 
     for k, v in draw_objects.items():
         svg.add(k, v)  # , options=layer_styles.get(k.lower(), {}))
+
+    tanaka_style = {
+        "fill": "none",
+        "stroke-width": "0.40",
+        "fill-opacity": "1.0",
+    }
+    svg.add(
+        "Contours2_High",
+        layer_contour2.out_tanaka([], document_info, highlights=True)[0],
+        {**tanaka_style, "stroke": "rgba(120, 120, 120, 1.0)"},
+    )
+    svg.add(
+        "Contours2_Low",
+        layer_contour2.out_tanaka([], document_info, highlights=False)[0],
+        {**tanaka_style, "stroke": "black"},
+    )
 
     svg.write()
     try:

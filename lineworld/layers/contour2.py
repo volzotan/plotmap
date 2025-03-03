@@ -12,6 +12,7 @@ from geoalchemy2 import WKBElement
 from geoalchemy2.shape import to_shape, from_shape
 from shapely import to_wkt
 from shapely.geometry import Polygon, MultiLineString, LineString, MultiPolygon
+from shapelysmooth import taubin_smooth
 from sqlalchemy import Table, Column, Integer, Float, ForeignKey
 from sqlalchemy import engine, MetaData
 from sqlalchemy import select
@@ -22,7 +23,7 @@ from lineworld.core.maptools import Projection
 from lineworld.layers.elevation import ElevationMapPolygon
 from lineworld.layers.layer import Layer
 from lineworld.util import gebco_grid_to_polygon
-from lineworld.util.geometrytools import unpack_multipolygon, process_polygons
+from lineworld.util.geometrytools import unpack_multipolygon, process_polygons, unpack_multilinestring
 
 from loguru import logger
 
@@ -107,6 +108,8 @@ class Contour2(Layer):
     DEFAULT_WINDOW_SIZE_SMOOTHING_LOW = 251
     DEFAULT_WINDOW_SIZE_SMOOTHING_HIGH = 501
 
+    DEFAULT_FILTER_MIN_AREA_MAP = 1.0
+
     def __init__(self, layer_id: str, db: engine.Engine, config: dict[str, Any]) -> None:
         super().__init__(layer_id, db, config)
 
@@ -178,6 +181,7 @@ class Contour2(Layer):
         data_url = self.config.get("data_url", self.DEFAULT_DATA_URL)
 
         # TODO: Download and unpack geoTiff files from the network
+
         # Downscaling
 
         dataset_files = [f for f in self.tiles_dir.iterdir() if f.is_file() and f.suffix == ".tif"]
@@ -215,7 +219,6 @@ class Contour2(Layer):
         if not self.projected_file.exists():
             logger.debug("projecting mosaic")
             gebco_grid_to_polygon.project(self.mosaic_file, self.projected_file)
-        # TODO: do the reproject so DEM smoothing can happen with the correct projection
 
         if "elevation_anchors" not in self.config:
             logger.warning(
@@ -275,7 +278,6 @@ class Contour2(Layer):
 
         polys = process_polygons(
             polys,
-            simplify_precision=self.config.get("tolerance", 0.1),
             check_valid=True,
         )
 
@@ -313,19 +315,32 @@ class Contour2(Layer):
             results = result.all()
             stat: dict[str, int] = {"invalid": 0, "empty": 0, "small": 0}
 
-            polys = np.array([to_shape(WKBElement(x.poly)) for x in results], dtype=Polygon)
+            polys = [to_shape(WKBElement(x.poly)) for x in results]
             bboxes = [to_shape(WKBElement(x.bbox)) for x in results]
 
-            stat["input"] = polys.shape[0]
+            stat["input"] = len(polys)
 
             processed_elevationPolygonLines = []
-            for i in range(polys.shape[0]):
-                for mline in self._style(polys[i], document_info, bbox=bboxes[i]):
-                    if mline.is_empty:
+            for i, poly in enumerate(polys):
+
+                poly = poly.segmentize(1.0)
+                poly = taubin_smooth(poly, steps=self.config.get("taubin_smoothing_steps", 5))
+                poly = poly.simplify(self.config.get("tolerance", 0.1))
+
+                for g in unpack_multipolygon(poly):
+
+                    if g.is_empty:
                         continue
 
-                    el = ContourMapLines(None, results[i].id, mline)
-                    processed_elevationPolygonLines.append(el)
+                    if g.area < self.config.get("filter_min_area_map", self.DEFAULT_FILTER_MIN_AREA_MAP):
+                        continue
+
+                    for mline in self._style(g, document_info, bbox=bboxes[i]):
+                        if mline.is_empty:
+                            continue
+
+                        el = ContourMapLines(None, results[i].id, mline)
+                        processed_elevationPolygonLines.append(el)
 
         # if len(processed_elevationPolygonLines) > 0:
         #     result = conn.execute(insert(self.lines_table), [l.todict() for l in processed_elevationPolygonLines])
@@ -400,6 +415,65 @@ class Contour2(Layer):
         # do not extend extrusion zones
 
         return (drawing_geometries, exclusion_zones)
+
+    def _cut_linestring(self, ls: LineString) -> np.array:
+        """
+        returns NumPy array [x1, y1, x2, y2]
+        """
+
+        coordinate_pairs = np.zeros([len(ls.coords) - 1, 4], dtype=float)
+
+        coordinate_pairs[:, 0] = ls.xy[0][:-1]
+        coordinate_pairs[:, 1] = ls.xy[1][:-1]
+        coordinate_pairs[:, 2] = ls.xy[0][1:]
+        coordinate_pairs[:, 3] = ls.xy[1][1:]
+
+        return coordinate_pairs
+
+    def out_tanaka(
+        self, exclusion_zones: list[Polygon], document_info: DocumentInfo, highlights: bool = False
+    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
+        """
+        correct results if (and only if) bounds are supplied in the right order, from lower to higher, ie.
+        BOUNDS = get_elevation_bounds([-20, 0], LEVELS)
+        """
+
+        angle = 135
+        width = 70
+
+        output_bright = []
+        output_dark = []
+
+        stencil = shapely.difference(document_info.get_viewport(), shapely.unary_union(exclusion_zones))
+
+        drawing_geometries = []
+        with self.db.begin() as conn:
+            result = conn.execute(select(self.map_lines_table))
+            drawing_geometries = [to_shape(row.lines) for row in result]
+
+            viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
+            viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
+            drawing_geometries = unpack_multilinestring(viewport_lines)
+
+        # cut linestrings to single lines
+        for ls in drawing_geometries:
+            lines = self._cut_linestring(ls)
+
+            # compute orientation of lines
+            theta = np.degrees(np.arctan2((lines[:, 3] - lines[:, 1]), (lines[:, 2] - lines[:, 0])))
+
+            bright_mask = (theta > (angle - width)) & (theta < (angle + width))
+
+            for line in lines[bright_mask]:
+                output_bright.append(LineString([line[:2], line[2:]]))
+
+            for line in lines[~bright_mask]:
+                output_dark.append(LineString([line[:2], line[2:]]))
+
+        # TODO: reassemble connected lines of same color to linestrings
+
+        # do not extend extrusion zones
+        return (output_bright if highlights else output_dark, exclusion_zones)
 
     def out_polygons(
         self,

@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -7,8 +8,14 @@ import rasterio
 from loguru import logger
 from rasterio.enums import Resampling
 from rasterio.merge import merge
+from rasterio.warp import reproject, calculate_default_transform
+from shapely import LineString
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import transform
+from shapelysmooth import taubin_smooth, chaikin_smooth
+
+from lineworld.core.svgwriter import SvgWriter
+from lineworld.util.geometrytools import unpack_multipolygon
 
 MORPH_KERNEL_SIZE = 7
 
@@ -122,6 +129,29 @@ def merge_and_write(geotiff_paths: list[Path], output_path: Path) -> None:
             dst.write(mosaic)
 
 
+def project(source_path: Path, destination_path: Path, destination_projection: str = "ESRI:54029") -> None:
+    with rasterio.open(source_path) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, destination_projection, src.width, src.height, *src.bounds
+        )
+        kwargs = src.meta.copy()
+        kwargs.update({"crs": destination_projection, "transform": transform, "width": width, "height": height})
+
+        with rasterio.open(destination_path, "w", **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                band_arr = src.read(i)
+
+                reproject(
+                    source=band_arr,
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=destination_projection,
+                    resampling=Resampling.nearest,
+                )
+
+
 def _extract_polygons(
     band: np.ndarray,
     threshold_value_low: float,
@@ -205,49 +235,176 @@ def _extract_polygons(
     return polygons
 
 
-def convert(geotiff_path: Path, layer_min_max: list[list[float]], allow_overlap: bool = True) -> list[list[Polygon]]:
+def convert(
+    dataset: rasterio.DatasetBase, band: np.ndarray, layer_min_max: list[list[float]], allow_overlap: bool = True
+) -> list[list[Polygon]]:
     """
     geotiff_path: path of the GeoTiff image file
     layer_min_max: min to max elevation for slicing
     allow_overlap: if true, the polygon for 2000-3000 meters will contain the polygon for 3000-4000m too. (i.e. polygons overlap like pyramids)
     """
 
-    with rasterio.open(geotiff_path) as dataset:
+    polygon_layers: list[list[Polygon]] = []
+    mask = np.zeros_like(band, dtype=np.uint8)
+
+    for layer_index in range(0, len(layer_min_max)):
+        threshold_value_low = layer_min_max[layer_index][0]
+        threshold_value_high = layer_min_max[layer_index][1]
+
+        extracted_geometries = _extract_polygons(
+            band,
+            threshold_value_low,
+            threshold_value_high,
+            allow_overlap,
+            mask=mask,
+        )
+
+        polygons = []
+        for g in extracted_geometries:
+            # convert pixel coordinates to lat lon with the geoTiff reference system
+            # flip xy for openCVs row,col order
+            g = transform(lambda x, y: dataset.xy(y, x), g)
+
+            if type(g) is Polygon:
+                polygons.append(g)
+            elif type(g) is MultiPolygon:
+                polygons += g.geoms
+            else:
+                logger.warning("polygon is not a polygon (actual type: {})".format(type(g)))
+                continue
+
+        polygon_layers.append(polygons)
+
+        logger.debug(
+            f"converted layer {layer_index:2d} [{threshold_value_low:9.2f} | {threshold_value_high:9.2f}] polygons: {len(polygon_layers[layer_index]):5d}"
+        )
+
+    return polygon_layers
+
+
+def _calculate_topographic_position_index(data: np.ndarray, window_size: int) -> np.ndarray:
+    """Simplified version of the Topographic Position Index
+    See: "Weiss, A., 2001. Topographic Position and Landforms Analysis"
+    """
+    data_positive = (data - np.min(data)).astype(float)
+    kernel = np.ones([window_size, window_size], dtype=float)
+    kernel[kernel.shape[0] // 2, kernel.shape[1] // 2] = 0
+    tpi = data_positive - (cv2.filter2D(data_positive, -1, kernel) / np.sum(kernel))
+    return tpi
+
+
+def _adaptive_smoothing(
+    data: np.ndarray, window_size_tpi: int, window_size_smoothing_low: int, window_size_smooting_high: int
+) -> np.ndarray:
+    """Adaptive Smoothing for DEM data
+    Based on the paper "A design of contour generation for topographic maps with adaptive DEM smoothing"
+    by Kettunen et al. https://www.tandfonline.com/doi/full/10.1080/23729333.2017.1300998
+    """
+
+    tpi = _calculate_topographic_position_index(data, window_size_tpi)
+    data_smoothed_low = cv2.blur(data, (window_size_smoothing_low, window_size_smoothing_low)).astype(np.int16)
+    data_smoothed_high = cv2.blur(data, (window_size_smooting_high, window_size_smooting_high)).astype(np.int16)
+    normalized_tpi = np.abs(tpi) / np.abs(np.max(tpi))
+    data_smoothed = (normalized_tpi * data_smoothed_high + (1 - normalized_tpi) * data_smoothed_low).astype(np.int16)
+
+    return data_smoothed
+
+
+def _debug_save_image(
+    output_path: Path,
+    data: np.ndarray,
+    resize_dimensions: tuple[int, int] | None = None,
+    normalize_max: float = None,
+) -> None:
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    if resize_dimensions is not None:
+        data = cv2.resize(data, resize_dimensions)
+
+    if normalize_max is None:
+        normalize_max = np.max(np.abs(data))
+
+    # normalize around 0
+    data = data / normalize_max
+
+    # center around 0.5 (colormap range [0,1])
+    data = (data / 2) + 0.5
+
+    cmap = mpl.colormaps["seismic"]
+    color_mapped_data = cmap(data)
+    plt.imsave(str(output_path), color_mapped_data, format="png")
+
+
+if __name__ == "__main__":
+    INPUT_FILE = Path("experiments/hatching/data/GebcoToBlender/fullsize_reproject.tif")
+    INPUT_FILE = Path("experiments/hatching/data/gebco_crop.tif")
+
+    OUTPUT_FILE = Path("output.svg")
+
+    layer_elevation_bounds = get_elevation_bounds([0, 10_000], 20)
+
+    with rasterio.open(INPUT_FILE) as dataset:
         band = dataset.read(1)
 
-        polygon_layers: list[list[Polygon]] = []
-        mask = np.zeros_like(band, dtype=np.uint8)
+        WINDOW_SIZE_TPI = 51
+        WINDOW_SIZE_SMOOTHING_LOW = 251
+        WINDOW_SIZE_SMOOTHING_HIGH = 501
 
-        for layer_index in range(0, len(layer_min_max)):
-            threshold_value_low = layer_min_max[layer_index][0]
-            threshold_value_high = layer_min_max[layer_index][1]
+        # tpi = _calculate_topographic_position_index(band, WINDOW_SIZE_TPI)
+        # band_smoothed_low = cv2.blur(band, (WINDOW_SIZE_SMOOTHING_LOW, WINDOW_SIZE_SMOOTHING_LOW))
+        # band_smoothed_high = cv2.blur(band, (WINDOW_SIZE_SMOOTHING_HIGH, WINDOW_SIZE_SMOOTHING_HIGH))
 
-            extracted_geometries = _extract_polygons(
-                band,
-                threshold_value_low,
-                threshold_value_high,
-                allow_overlap,
-                mask=mask,
-            )
+        # _debug_save_image("tpi.png", tpi, (5000, 5000))
+        # _debug_save_image("low.png", band_smoothed_low, (5000, 5000), normalize_max=10_000)
+        # _debug_save_image("high.png", band_smoothed_high, (5000, 5000), normalize_max=10_000)
 
-            polygons = []
-            for g in extracted_geometries:
-                # convert pixel coordinates to lat lon with the geoTiff reference system
-                # flip xy for openCVs row,col order
-                g = transform(lambda x, y: dataset.xy(y, x), g)
+        # normalized_tpi = np.abs(tpi) / np.abs(np.max(tpi))
+        # band_smoothed = normalized_tpi * band_smoothed_high + (1 - normalized_tpi) * band_smoothed_low
+        # _debug_save_image("comb.png", band_smoothed, (5000, 5000), normalize_max=10_000)
+        # _debug_save_image("orig.png", band, (5000, 5000), normalize_max=10_000)
 
-                if type(g) is Polygon:
-                    polygons.append(g)
-                elif type(g) is MultiPolygon:
-                    polygons += g.geoms
-                else:
-                    logger.warning("polygon is not a polygon (actual type: {})".format(type(g)))
-                    continue
+        converted_layers = convert(dataset, band, layer_elevation_bounds, allow_overlap=True)
 
-            polygon_layers.append(polygons)
+        lines = []
+        for layer in converted_layers:
+            for p in layer:
+                lines += [LineString(p.exterior.coords)]
+                lines += [LineString(x.coords) for x in p.interiors]
 
-            logger.debug(
-                f"converted layer {layer_index:2d} [{threshold_value_low:9.2f} | {threshold_value_high:9.2f}] polygons: {len(polygon_layers[layer_index]):5d}"
-            )
+        svg = SvgWriter(OUTPUT_FILE, band.shape)
 
-        return polygon_layers
+        options = {"fill": "none", "stroke": "black", "stroke-width": "1"}
+        svg.add("original", lines, options=options)
+
+        band_smoothed = _adaptive_smoothing(
+            band, WINDOW_SIZE_TPI, WINDOW_SIZE_SMOOTHING_LOW, WINDOW_SIZE_SMOOTHING_HIGH
+        )
+
+        options_blurred = {**options, "stroke": "red"}
+        converted_layers = convert(dataset, band_smoothed, layer_elevation_bounds, allow_overlap=True)
+        lines_blurred = []
+        for layer in converted_layers:
+            for p in layer:
+                lines_blurred += [LineString(p.exterior.coords)]
+                lines_blurred += [LineString(x.coords) for x in p.interiors]
+
+        svg.add("blurred", lines_blurred, options=options_blurred)
+
+        SEGMENTIZE_VALUE = 10
+        SIMPLIFY_VALUE = 0.5
+
+        options_segmentized = {**options, "stroke": "yellow"}
+        lines_blurred_segmentized = []
+        for l in lines_blurred:
+            processed = l.segmentize(SEGMENTIZE_VALUE)
+            if type(processed) == LineString and not processed.is_empty:
+                lines_blurred_segmentized.append(processed)
+        svg.add("segmentized", lines_blurred_segmentized, options=options_segmentized)
+
+        options_smoothed_t = {**options, "stroke": "green"}
+        svg.add(
+            "smoothed_t", [taubin_smooth(l, steps=100) for l in lines_blurred_segmentized], options=options_smoothed_t
+        )
+
+        svg.write()
