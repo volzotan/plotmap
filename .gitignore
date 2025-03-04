@@ -4,11 +4,11 @@
 data/*
 _db/*
 tmp/*
+tests_output/*
 
 *.pyc
 *.nc
 *.pstat
 
 REFERENCE_MAPS/*
-
 experiments/conductor/*

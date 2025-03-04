@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -7,11 +9,11 @@ from lineworld.util import gebco_grid_to_polygon
 
 
 @pytest.fixture
-def single_poly() -> np.ndarray:
+def single_poly(output_path: Path) -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
     cv2.rectangle(band, (100, 100), (1900, 900), (100), -1)
     cv2.rectangle(band, (200, 200), (1800, 800), (200), -1)
-    cv2.imwrite("test_single_poly.png", band)
+    cv2.imwrite(str(Path(output_path, Path("test_single_poly.png"))), band)
     return band
 
 
@@ -29,12 +31,12 @@ def test_convert_single_poly(single_poly: np.ndarray, allow_overlap: bool) -> No
 
 
 @pytest.fixture
-def poly_with_hole() -> np.ndarray:
+def poly_with_hole(output_path: Path) -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
     cv2.rectangle(band, (100, 100), (1900, 900), (100), -1)
     cv2.rectangle(band, (200, 200), (1800, 800), (200), -1)
     cv2.rectangle(band, (300, 300), (1700, 700), (0), -1)
-    cv2.imwrite("test_poly_with_hole.png", band)
+    cv2.imwrite(str(Path(output_path, Path("test_poly_with_hole.png"))), band)
     return band
 
 
@@ -50,13 +52,13 @@ def test_convert_poly_with_hole(poly_with_hole: np.ndarray, allow_overlap: bool)
 
 
 @pytest.fixture
-def poly_with_hole_and_island() -> np.ndarray:
+def poly_with_hole_and_island(output_path: Path) -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
     cv2.rectangle(band, (100, 100), (1900, 900), (100), -1)
     cv2.rectangle(band, (200, 200), (1800, 800), (200), -1)
     cv2.rectangle(band, (300, 300), (1700, 700), (0), -1)
     cv2.rectangle(band, (400, 400), (1600, 600), (250), -1)
-    cv2.imwrite("test_poly_with_hole_and_island.png", band)
+    cv2.imwrite(str(Path(output_path, Path("test_poly_with_hole_and_island.png"))), band)
     return band
 
 
@@ -76,13 +78,13 @@ def test_convert_poly_with_hole_and_island(poly_with_hole_and_island: np.ndarray
 
 
 @pytest.fixture
-def poly_with_multiple_holes() -> np.ndarray:
+def poly_with_multiple_holes(output_path: Path) -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
     cv2.rectangle(band, (100, 100), (1900, 900), (100), -1)
     cv2.rectangle(band, (200, 200), (300, 300), (0), -1)
     cv2.rectangle(band, (200, 400), (300, 500), (0), -1)
     cv2.rectangle(band, (200, 600), (300, 700), (0), -1)
-    cv2.imwrite("test_poly_with_multiple_holes.png", band)
+    cv2.imwrite(str(Path(output_path, Path("test_poly_with_multiple_holes.png"))), band)
     return band
 
 
@@ -98,13 +100,13 @@ def test_convert_poly_with_multiple_holes(poly_with_multiple_holes: np.ndarray, 
 
 
 @pytest.fixture
-def poly_with_multiple_layers() -> np.ndarray:
+def poly_with_multiple_layers(output_path: Path) -> np.ndarray:
     band = np.zeros((1000, 2000, 1), np.uint8)
     cv2.rectangle(band, (100, 100), (900, 900), (100), -1)
     cv2.rectangle(band, (200, 200), (800, 800), (150), -1)
     cv2.rectangle(band, (300, 300), (700, 700), (200), -1)
     cv2.rectangle(band, (400, 400), (600, 600), (250), -1)
-    cv2.imwrite("poly_with_multiple_layers.png", band)
+    cv2.imwrite(str(Path(output_path, Path("poly_with_multiple_layers.png"))), band)
     return band
 
 
