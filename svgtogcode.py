@@ -13,15 +13,7 @@ from shapely import LineString, Point
 DEFAULT_INPUT_FILENAME = "world.svg"
 DEFAULT_MAX_LENGTH_SEGMENT = 50  # in m
 
-# FILTER_BY_LAYER = ["coastlines"]
-# FILTER_BY_LAYER = ["coastlines_hatching"]
-# FILTER_BY_LAYER = ["places"]
-# FILTER_BY_LAYER = ["places_circles"]
-# FILTER_BY_LAYER = ["bathymetry"]
-# FILTER_BY_LAYER = ["terrain"]
-# FILTER_BY_LAYER = ["meta"]
-
-OFFSET = [0, 0]  # [-1425, -000]
+OFFSET = [0, 0]
 
 # Rotate by 90 degrees
 ROTATE_90 = False
@@ -35,8 +27,8 @@ PEN_UP_DISTANCE = 3.0
 PEN_DIP_UP_DISTANCE = 7.0
 PEN_DIP_DOWN_DISTANCE = 2.0
 
-COMP_TOLERANCE = 0.9
-MIN_LINE_LENGTH = 0.75  # in mm
+COMP_TOLERANCE = 0.20
+MIN_LINE_LENGTH = 0.10  # in mm
 
 WAIT_INIT = 5000
 
@@ -101,14 +93,24 @@ def process(e: Any, default_namespace: str) -> list[tuple[float, float, float, f
 
     if e.tag == default_namespace + "path":
         d = e.attrib["d"]
-        d = d[1:]  # cut off the M
-        segments = d.split("L")
 
+        # cut off the M
+        d = d[1:]
+
+        # cut off the Z
+        closed = True if d.endswith("Z") else False
+        if closed:
+            d = d[:-1]
+
+        segments = d.split("L")
         l = []
 
         for s in segments:
             pairs = s.strip().split(" ")
             l.append([float(pairs[0]), float(pairs[1])])
+
+        if closed:
+            l.append(l[0])
 
         for i in range(1, len(l)):
             lines.append([l[i - 1][0], l[i - 1][1], l[i][0], l[i][1]])
