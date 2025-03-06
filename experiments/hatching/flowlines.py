@@ -83,17 +83,9 @@ class FlowlineTilerPoly:
             if self.config.MM_TO_PX_CONVERSION_FACTOR * self.config.LINE_STEP_DISTANCE < 1:
                 raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
 
-        # Prepare a non-linear scale for the density calculations
-        scale_adjustment_value = self.config.SCALE_ADJUSTMENT_VALUE
-        scale = scales.Scale(
-            scales.quadratic_bezier,
-            {
-                "p1": [0.0 + scale_adjustment_value, 0.0],
-                "p2": [1.0 - scale_adjustment_value, 1.0],
-            },
-        )
-
-        self.tiles = [{} for _ in polygons]
+        self.tiles = [{
+            "linestrings": []
+        } for _ in polygons]
 
     def hatch(self) -> list[LineString]:
         cluster = LocalCluster(n_workers=4, threads_per_worker=1, memory_limit="6GB")
@@ -136,7 +128,6 @@ class FlowlineTilerPoly:
 
             if max_row - min_row < 10 or max_col - min_col < 10:
                 logger.warning(f"empty tile {p}")
-                self.tiles[i]["linestrings"] = []
                 continue
 
             elevation_tile = self.elevation[min_row:max_row, min_col:max_col]
@@ -637,7 +628,6 @@ class FlowlineHatcher:
                 starting_points.append([i, j])
 
         for i in range(self.MAX_ITERATIONS):
-
             if i >= self.MAX_ITERATIONS - 1:
                 if len(self.tile_name) > 0:
                     logger.warning(f"{self.tile_name}: max iterations exceeded")
