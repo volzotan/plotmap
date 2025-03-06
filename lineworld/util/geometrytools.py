@@ -55,6 +55,17 @@ def crop_geometry(main: list[Geometry] | Geometry, tool: list[Geometry]) -> list
     pass
 
 
+def _linestring_to_coordinate_pairs(
+    linestring: LineString,
+) -> list[list[tuple[float, float]]]:
+    pairs = []
+
+    for i in range(len(linestring.coords) - 1):
+        pairs.append([linestring.coords[i], linestring.coords[i + 1]])
+
+    return pairs
+
+
 def unpack_multipolygon(g: Geometry | list[Geometry] | np.ndarray) -> list[Polygon]:
     return _unpack_multigeometry(g, Polygon)
 

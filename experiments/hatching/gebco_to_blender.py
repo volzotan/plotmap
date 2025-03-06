@@ -1,3 +1,4 @@
+import os
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -20,6 +21,7 @@ REPROJECT_FILE = Path(DATA_DIR, "fullsize_reproject.tif")
 GEOTIFF_SCALING_FACTOR = 1
 
 OVERWRITE = True
+BATHYMETRY_ONLY = False
 
 
 def downscale_and_write(input_path: Path, output_path: Path, scaling_factor: float) -> None:
@@ -83,10 +85,11 @@ def reproject_dataset(src: Path, dst: Path) -> None:
 
         with rasterio.open(dst, "w", **kwargs) as dst:
             for i in range(1, src.count + 1):
-                # remove any above-waterlevel terrain
-                band = rasterio.band(src, i)
                 band_arr = src.read(i)
-                band_arr[band_arr > 0] = 0
+
+                # remove any above-waterlevel terrain
+                if BATHYMETRY_ONLY:
+                    band_arr[band_arr > 0] = 0
 
                 reproject(
                     source=band_arr,
@@ -108,15 +111,20 @@ if __name__ == "__main__":
         logger.warning("no GeoTiffs to transform")
 
     scaled_files = []
-    for dataset_file in dataset_files:
-        scaled_path = Path(SCALED_DIR, dataset_file.name)
-        scaled_files.append(scaled_path)
+    if GEOTIFF_SCALING_FACTOR == 1:
+        scaled_files = dataset_files
+    else:
+        if not os.path.exists(SCALED_DIR):
+            os.makedirs(SCALED_DIR)
+        for dataset_file in dataset_files:
+            scaled_path = Path(SCALED_DIR, dataset_file.name)
+            scaled_files.append(scaled_path)
 
-        if scaled_path.exists() and not OVERWRITE:
-            continue
+            if scaled_path.exists() and not OVERWRITE:
+                continue
 
-        logger.debug(f"downscaling tile: {dataset_file}")
-        downscale_and_write(dataset_file, scaled_path, GEOTIFF_SCALING_FACTOR)
+            logger.debug(f"downscaling tile: {dataset_file}")
+            downscale_and_write(dataset_file, scaled_path, GEOTIFF_SCALING_FACTOR)
 
     # Merging tiles into a mosaic
     if not MOSAIC_FILE.exists() or OVERWRITE:

@@ -12,6 +12,8 @@ from loguru import logger
 from shapely import LineString, Point
 from svgpathtools import parse_path
 
+from lineworld.util.geometrytools import _linestring_to_coordinate_pairs
+
 
 class Align(Enum):
     LEFT = "LEFT"
@@ -252,17 +254,6 @@ class HersheyFont:
                     cv2.line(img, pt1, pt2, (0, 0, 0), 4)
 
         return output
-
-
-def _linestring_to_coordinate_pairs(
-    linestring: LineString,
-) -> list[list[tuple[float, float]]]:
-    pairs = []
-
-    for i in range(len(linestring.coords) - 1):
-        pairs.append([linestring.coords[i], linestring.coords[i + 1]])
-
-    return pairs
 
 
 if __name__ == "__main__":

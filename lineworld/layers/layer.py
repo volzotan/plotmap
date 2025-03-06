@@ -1,7 +1,10 @@
 from typing import Any
 
+from shapely import Polygon, Geometry
 from sqlalchemy import engine
 from loguru import logger
+
+from lineworld.core.maptools import DocumentInfo
 
 
 class Layer:
@@ -19,14 +22,14 @@ class Layer:
     def transform_to_world(self):
         pass
 
-    def transform_to_map(self):
+    def transform_to_map(self, document_info: DocumentInfo) -> list[Any]:
         pass
 
-    def transform_to_lines(self):
+    def transform_to_lines(self, document_info: DocumentInfo) -> list[Any]:
         pass
 
-    def load(self):
+    def load(self, geometries: list[Any]) -> None:
         pass
 
-    def out(self):
+    def out(self, exclusion_zones: list[Polygon], document_info: DocumentInfo) -> tuple[list[Geometry], list[Polygon]]:
         pass

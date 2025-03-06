@@ -10,7 +10,7 @@ from core.maptools import DocumentInfo
 import geoalchemy2
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import to_shape, from_shape
-from shapely import to_wkt
+from shapely import STRtree, Geometry
 from shapely.geometry import Polygon, MultiLineString, LineString, MultiPolygon
 from shapelysmooth import taubin_smooth
 from sqlalchemy import Table, Column, Integer, Float, ForeignKey
@@ -20,7 +20,6 @@ from sqlalchemy import text
 from sqlalchemy import insert
 
 from lineworld.core.maptools import Projection
-from lineworld.layers.elevation import ElevationMapPolygon
 from lineworld.layers.layer import Layer
 from lineworld.util import gebco_grid_to_polygon
 from lineworld.util.geometrytools import unpack_multipolygon, process_polygons, unpack_multilinestring
@@ -392,9 +391,7 @@ class Contour2(Layer):
         lines += [x.coords for x in p.interiors]
         return [MultiLineString(lines)]
 
-    def out(
-        self, exclusion_zones: list[Polygon], document_info: DocumentInfo
-    ) -> tuple[list[shapely.Geometry], list[Polygon]]:
+    def out(self, exclusion_zones: list[Polygon], document_info: DocumentInfo) -> tuple[list[Geometry], list[Polygon]]:
         """
         Returns (drawing geometries, exclusion polygons)
         """
@@ -442,16 +439,14 @@ class Contour2(Layer):
         output_bright = []
         output_dark = []
 
-        stencil = shapely.difference(document_info.get_viewport(), shapely.unary_union(exclusion_zones))
+        # stencil = shapely.difference(document_info.get_viewport(), shapely.unary_union(exclusion_zones))
 
         drawing_geometries = []
         with self.db.begin() as conn:
             result = conn.execute(select(self.map_lines_table))
-            drawing_geometries = [to_shape(row.lines) for row in result]
-
-            viewport_lines = shapely.intersection(stencil, np.array(drawing_geometries, dtype=MultiLineString))
-            viewport_lines = viewport_lines[~shapely.is_empty(viewport_lines)]
-            drawing_geometries = unpack_multilinestring(viewport_lines)
+            drawing_geometries = np.array([to_shape(row.lines) for row in result], dtype=MultiLineString)
+            drawing_geometries = drawing_geometries[~shapely.is_empty(drawing_geometries)]
+            drawing_geometries = unpack_multilinestring(drawing_geometries)
 
         # cut linestrings to single lines
         for ls in drawing_geometries:
@@ -470,8 +465,22 @@ class Contour2(Layer):
 
         # TODO: reassemble connected lines of same color to linestrings
 
-        # do not extend extrusion zones
-        return (output_bright if highlights else output_dark, exclusion_zones)
+        # cut extrusion_zones into drawing_geometries
+        # Note: using a STRtree here instead of unary_union() and difference() is a 6x speedup
+        drawing_geometries_cut = []
+        tree = STRtree(exclusion_zones)
+        for g in output_bright if highlights else output_dark:
+            g_processed = g
+            for i in tree.query(g):
+                g_processed = shapely.difference(g_processed, exclusion_zones[i])
+                if g_processed.is_empty:
+                    break
+            else:
+                drawing_geometries_cut.append(g_processed)
+
+        # and do not add anything to exclusion_zones
+        return (drawing_geometries_cut, exclusion_zones)
+
 
     def out_polygons(
         self,
