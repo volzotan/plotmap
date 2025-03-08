@@ -87,11 +87,16 @@ class DocumentInfo:
     def get_document_size(self) -> tuple[int, int]:
         return (self.width, self.height)
 
+    def get_viewport_padding(self) -> list[float | int]:
+        return self.config.get("viewport_padding", [0, 0, 0, 0])
+
     def get_viewport(self) -> Polygon:
-        if self.config.get("debug", False):
-            return shapely.box(-self.width, -self.height, self.width * 2, self.height * 2)
-        else:
-            return shapely.box(0, 0, self.width, self.height)
+        # if self.config.get("debug", False):
+        #     return shapely.box(-self.width, -self.height, self.width * 2, self.height * 2)
+        # else:
+
+        padding_top, padding_right, padding_bottom, padding_left = self.config.get("viewport_padding", [0, 0, 0, 0])
+        return shapely.box(padding_left, padding_top, self.width - padding_right, self.height - padding_bottom)
 
     def get_projection_func(self, src_projection: Projection) -> Any:
         crs_src = pyproj.CRS(f"{src_projection.value[0]}:{src_projection.value[1]}")
