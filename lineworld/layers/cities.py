@@ -7,7 +7,7 @@ from typing import Any
 import geoalchemy2
 import numpy as np
 import shapely
-from core.maptools import DocumentInfo, Projection
+from core.map import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
 from loguru import logger
@@ -74,7 +74,7 @@ class Cities(Layer):
         metadata = MetaData()
 
         self.map_lines_table = Table(
-            "cities_map_lines",
+            f"{self.config_name}_cities_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("circlelines", geoalchemy2.Geometry("LINESTRING"), nullable=False),

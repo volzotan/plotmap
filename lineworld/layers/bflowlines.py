@@ -8,9 +8,9 @@ import geoalchemy2
 import numpy as np
 import rasterio
 import shapely
-from core.maptools import DocumentInfo, Projection
+from lineworld.core.map import DocumentInfo, Projection
 from geoalchemy2.shape import to_shape, from_shape
-from layers.layer import Layer
+from lineworld.layers.layer import Layer
 from loguru import logger
 from scipy import ndimage
 from shapely import Polygon, MultiLineString, STRtree
@@ -29,10 +29,11 @@ from rasterio.warp import (
 )
 
 import lineworld
-from experiments.hatching import flowlines
-from experiments.hatching.flowlines import FlowlineTiler, FlowlineTilerPoly
+from lineworld.core import flowlines
+from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPoly
 from lineworld.util.gebco_grid_to_polygon import _calculate_topographic_position_index
 from lineworld.util.rastertools import normalize_to_uint8
+from lineworld.util.slope import get_slope
 
 
 @dataclass
@@ -82,7 +83,7 @@ class BathymetryFlowlines(Layer):
         metadata = MetaData()
 
         self.map_lines_table = Table(
-            "bathymetryflowlines_map_lines",
+            f"{self.config_name}_bathymetryflowlines_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("lines", geoalchemy2.Geometry("LINESTRING"), nullable=False),
@@ -161,25 +162,22 @@ class BathymetryFlowlines(Layer):
         flow_config = flowlines.FlowlineHatcherConfig()
         flow_config = lineworld.apply_config_to_object(self.config, flow_config)
 
-        data = None
+        elevation = None
         with rasterio.open(self.elevation_file) as dataset:
-            data = dataset.read(1)
+            elevation = dataset.read(1)
 
-        data = cv2.resize(data, [document_info.width * 10, document_info.width * 10])  # TODO
-
-        flow_config.MM_TO_PX_CONVERSION_FACTOR = data.shape[1] / document_info.width
+        elevation = cv2.resize(elevation, [document_info.width, document_info.width])  # TODO
 
         density = None
         try:
             # use uint8 for the density map to save some memory and 256 values will be enough precision
             density = cv2.imread(str(self.density_file), cv2.IMREAD_GRAYSCALE)
             density = normalize_to_uint8(density)
-            density = cv2.resize(density, data.shape)
+            density = cv2.resize(density, [elevation.shape[1], elevation.shape[0]])
 
             # 50:50 blend of elevation data and externally computed density image
-            data_normalized = normalize_to_uint8(data)
-
-            density = np.mean(np.dstack([density, data_normalized]), axis=2).astype(np.uint8)
+            elevation_normalized = normalize_to_uint8(elevation)
+            density = np.mean(np.dstack([density, elevation_normalized]), axis=2).astype(np.uint8)
 
         except Exception as e:
             logger.error(e)
@@ -189,29 +187,34 @@ class BathymetryFlowlines(Layer):
         # tpi = np.clip(np.abs(tpi), 0, MAX_TPI)
         # normalized_tpi = normalize_to_uint8(tpi)
 
+        _, _, _, _, angles, inclination = get_slope(elevation, 1)
+
         WINDOW_SIZE = 25
         MAX_WIN_VAR = 40000
-        win_mean = ndimage.uniform_filter(data.astype(float), (WINDOW_SIZE, WINDOW_SIZE))
-        win_sqr_mean = ndimage.uniform_filter(data.astype(float) ** 2, (WINDOW_SIZE, WINDOW_SIZE))
+        win_mean = ndimage.uniform_filter(elevation.astype(float), (WINDOW_SIZE, WINDOW_SIZE))
+        win_sqr_mean = ndimage.uniform_filter(elevation.astype(float) ** 2, (WINDOW_SIZE, WINDOW_SIZE))
         win_var = win_sqr_mean - win_mean**2
         win_var = np.clip(win_var, 0, MAX_WIN_VAR)
         win_var = win_var * -1 + MAX_WIN_VAR
         win_var = (np.iinfo(np.uint8).max * ((win_var - np.min(win_var)) / np.ptp(win_var))).astype(np.uint8)
 
-        mappings = np.zeros([data.shape[0], data.shape[1], 2], dtype=np.uint8)
-        mappings[:, :, flowlines.MAPPING_DISTANCE] = density[:, :]
-        mappings[:, :, flowlines.MAPPING_MAX_SEGMENTS] = win_var[:, :]
+        mapping_angle = angles  # float
+        mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
+        mapping_non_flat[inclination > flow_config.MIN_INCLINATION] = 255  # uint8
+        mapping_distance = density  # uint8
+        mapping_max_segments = win_var  # uint8
+
+        mappings = [mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments]
 
         tiler = None
         if self.tile_boundaries is not None and len(self.tile_boundaries) > 0:
             # convert from map coordinates to raster pixel coordinates
-            mat = document_info.get_transformation_matrix_map_to_raster(data.shape[1], data.shape[0])
+            mat = document_info.get_transformation_matrix_map_to_raster(elevation.shape[1], elevation.shape[0])
             raster_tile_boundaries = [affine_transform(boundary, mat) for boundary in self.tile_boundaries]
 
-            tiler = FlowlineTilerPoly(data, mappings, flow_config, raster_tile_boundaries)
+            tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries)
         else:
             tiler = FlowlineTiler(
-                data,
                 mappings,
                 flow_config,
                 (self.config.get("num_tiles", 4), self.config.get("num_tiles", 4)),
@@ -220,7 +223,7 @@ class BathymetryFlowlines(Layer):
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates
-        mat = document_info.get_transformation_matrix_raster_to_map(data.shape[1], data.shape[0])
+        mat = document_info.get_transformation_matrix_raster_to_map(elevation.shape[1], elevation.shape[0])
         linestrings = [affine_transform(line, mat) for line in linestrings]
         linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
@@ -256,8 +259,14 @@ class BathymetryFlowlines(Layer):
         # Note: using a STRtree here instead of unary_union() and difference() is a 6x speedup
         drawing_geometries_cut = []
         tree = STRtree(exclusion_zones)
+
+        viewport = document_info.get_viewport()
+
         for g in drawing_geometries:
-            g_processed = g
+            g_processed = shapely.intersection(g, viewport)
+            if g_processed.is_empty:
+                continue
+
             for i in tree.query(g):
                 g_processed = shapely.difference(g_processed, exclusion_zones[i])
                 if g_processed.is_empty:

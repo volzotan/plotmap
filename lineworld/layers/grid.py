@@ -5,9 +5,9 @@ from typing import Any
 import geoalchemy2
 import numpy as np
 import shapely
-from core.maptools import DocumentInfo, Projection
+from lineworld.core.map import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
-from layers.layer import Layer
+from lineworld.layers.layer import Layer
 from loguru import logger
 from shapely import envelope, MultiLineString, MultiPolygon, LineString, Point, Polygon
 from shapely.affinity import affine_transform
@@ -193,9 +193,10 @@ class GridBathymetry(Grid):
         super().__init__(layer_id, db, config)
 
         metadata = MetaData()
+        config_name = self.config.get("name", "Basic").lower()
 
         self.map_lines_table = Table(
-            "gridbathymetry_map_lines",
+            f"{config_name}_gridbathymetry_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
@@ -260,7 +261,7 @@ class GridLabels(Grid):
         metadata = MetaData()
 
         self.map_lines_table = Table(
-            "gridlabels_map_lines",
+            f"{self.config_name}_gridlabels_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("lines", geoalchemy2.Geometry("MULTILINESTRING"), nullable=False),
@@ -284,6 +285,9 @@ class GridLabels(Grid):
 
         project_func = document_info.get_projection_func(self.DATA_SRID)
         mat = document_info.get_transformation_matrix()
+        viewport = document_info.get_viewport()
+
+        viewport_left, viewport_top, viewport_right, viewport_bottom = viewport.bounds
 
         labels = []
 
@@ -305,7 +309,9 @@ class GridLabels(Grid):
             # TOP
 
             intersect_point_top = lon_line.intersection(
-                LineString([[0, self.OFFSET_TOP], [document_info.width, self.OFFSET_TOP]])
+                LineString(
+                    [[viewport_left, viewport_top + self.OFFSET_TOP], [viewport_right, viewport_top + self.OFFSET_TOP]]
+                )
             )
 
             if intersect_point_top is None or intersect_point_top.is_empty:
@@ -326,16 +332,12 @@ class GridLabels(Grid):
                 LineString(
                     [
                         [
-                            0,
-                            document_info.height
-                            - self.OFFSET_BOTTOM
-                            + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
+                            viewport_left,
+                            viewport_bottom - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
                         ],
                         [
-                            document_info.width,
-                            document_info.height
-                            - self.OFFSET_BOTTOM
-                            + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
+                            viewport_right,
+                            viewport_bottom - self.OFFSET_BOTTOM + self.config.get("font_size", self.DEFAULT_FONT_SIZE),
                         ],
                     ]
                 )
@@ -371,7 +373,12 @@ class GridLabels(Grid):
             # LEFT
 
             intersect_point_left = lat_line.intersection(
-                LineString([[self.OFFSET_LEFT, 0], [self.OFFSET_LEFT, document_info.height]])
+                LineString(
+                    [
+                        [viewport_left + self.OFFSET_LEFT, viewport_top],
+                        [viewport_left + self.OFFSET_LEFT, viewport_bottom],
+                    ]
+                )
             )
 
             if type(intersect_point_left) is not Point or intersect_point_left is None or intersect_point_left.is_empty:
@@ -391,8 +398,8 @@ class GridLabels(Grid):
             intersect_point_right = lat_line.intersection(
                 LineString(
                     [
-                        [document_info.width - self.OFFSET_RIGHT, 0],
-                        [document_info.width - self.OFFSET_RIGHT, document_info.height],
+                        [viewport_right - self.OFFSET_RIGHT, viewport_top],
+                        [viewport_right - self.OFFSET_RIGHT, viewport_bottom],
                     ]
                 )
             )

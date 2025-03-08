@@ -1,10 +1,11 @@
+import re
 from typing import Any
 
 from shapely import Polygon, Geometry
 from sqlalchemy import engine
 from loguru import logger
 
-from lineworld.core.maptools import DocumentInfo
+from lineworld.core.map import DocumentInfo
 
 
 class Layer:
@@ -17,6 +18,7 @@ class Layer:
         if "layer" not in config or layer_id not in config["layer"]:
             logger.warning(f"layer {layer_id} has no configuration entry. Using default configuration.")
 
+        self.config_name = re.sub(r"\W+", "", config.get("name", "Basic").lower())
         self.config = config.get("layer", {}).get(layer_id, {})
 
     def transform_to_world(self):

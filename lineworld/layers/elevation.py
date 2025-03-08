@@ -6,7 +6,7 @@ from typing import Any
 from loguru import logger
 import numpy as np
 import shapely
-from core.maptools import DocumentInfo, Projection
+from core.map import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer

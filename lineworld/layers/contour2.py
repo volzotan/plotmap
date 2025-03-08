@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import rasterio
 import shapely
-from core.maptools import DocumentInfo
+from core.map import DocumentInfo
 import geoalchemy2
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import to_shape, from_shape
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy import text
 from sqlalchemy import insert
 
-from lineworld.core.maptools import Projection
+from lineworld.core.map import Projection
 from lineworld.layers.layer import Layer
 from lineworld.util import gebco_grid_to_polygon
 from lineworld.util.geometrytools import unpack_multipolygon, process_polygons, unpack_multilinestring
@@ -132,7 +132,7 @@ class Contour2(Layer):
         metadata = MetaData()
 
         self.world_polygon_table = Table(
-            "contour_world_polygons",
+            f"{self.config_name}_contour_world_polygons",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("elevation_level", Integer),
@@ -146,7 +146,7 @@ class Contour2(Layer):
         )
 
         self.map_polygon_table = Table(
-            "contour_map_polygons",
+            f"{self.config_name}_contour_map_polygons",
             metadata,
             Column("id", Integer, primary_key=True),
             Column(
@@ -161,7 +161,7 @@ class Contour2(Layer):
         )
 
         self.map_lines_table = Table(
-            "contour_map_lines",
+            f"{self.config_name}_contour_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("map_polygon_id", ForeignKey(f"{self.map_polygon_table.fullname}.id")),
@@ -480,7 +480,6 @@ class Contour2(Layer):
 
         # and do not add anything to exclusion_zones
         return (drawing_geometries_cut, exclusion_zones)
-
 
     def out_polygons(
         self,

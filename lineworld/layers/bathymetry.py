@@ -3,7 +3,7 @@ from typing import Any
 import geoalchemy2
 import shapely
 from core.hatching import HatchingOptions, HatchingDirection, create_hatching
-from core.maptools import DocumentInfo
+from core.map import DocumentInfo
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import to_shape
 from layers.elevation import ElevationLayer
@@ -23,7 +23,7 @@ class Bathymetry(ElevationLayer):
         metadata = MetaData()
 
         self.world_polygon_table = Table(
-            "bathymetry_world_polygons",
+            f"{self.config_name}_bathymetry_world_polygons",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("elevation_level", Integer),
@@ -37,7 +37,7 @@ class Bathymetry(ElevationLayer):
         )
 
         self.map_polygon_table = Table(
-            "bathymetry_map_polygons",
+            f"{self.config_name}_bathymetry_map_polygons",
             metadata,
             Column("id", Integer, primary_key=True),
             Column(
@@ -52,7 +52,7 @@ class Bathymetry(ElevationLayer):
         )
 
         self.map_lines_table = Table(
-            "bathymetry_map_lines",
+            f"{self.config_name}_bathymetry_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("map_polygon_id", ForeignKey(f"{self.map_polygon_table.fullname}.id")),

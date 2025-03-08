@@ -8,7 +8,7 @@ import fiona
 import geoalchemy2
 import numpy as np
 import shapely
-from core.maptools import DocumentInfo, Projection
+from core.map import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
 from layers.layer import Layer
@@ -95,7 +95,7 @@ class Coastlines(Layer):
         metadata = MetaData()
 
         self.world_polygon_table = Table(
-            "coastlines_world_polygons",
+            f"{self.config_name}_coastlines_world_polygons",
             metadata,
             Column("id", Integer, primary_key=True),
             Column(
@@ -106,7 +106,7 @@ class Coastlines(Layer):
         )
 
         self.map_lines_table = Table(
-            "coastlines_map_lines",
+            f"{self.config_name}_coastlines_map_lines",
             metadata,
             Column("id", Integer, primary_key=True),
             Column("polygon_id", ForeignKey(f"{self.world_polygon_table.fullname}.id")),

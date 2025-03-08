@@ -13,8 +13,8 @@ from shapely import Point, LineString, MultiLineString, STRtree, Polygon
 from shapely.affinity import affine_transform, translate
 
 import lineworld
-from lineworld.core import maptools
-from lineworld.core.maptools import Projection, DocumentInfo
+from lineworld.core import map
+from lineworld.core.map import Projection, DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.hersheyfont import HersheyFont, Align
 
@@ -56,6 +56,9 @@ class City:
 
 
 def _anneal(cities: list[City], region: list[int], config: dict[str, Any]):
+    # TODO: we're not exactly doing simulated annealing here because only better states are accepted,
+    #  not marginally worse ones based on current temperature
+
     state = np.zeros([len(region)], dtype=int)
     for i in range(state.shape[0]):
         state[i] = random.randrange(8)
