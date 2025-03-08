@@ -33,7 +33,7 @@ def _draw_linestrings(canvas: np.ndarray, linestrings: list[LineString]):
 
 def test_text_straight(font: HersheyFont, canvas: np.ndarray, output_path: Path):
     for i, alignment in enumerate([Align.LEFT, Align.CENTER, Align.RIGHT]):
-        offset_y =int(100 + i*100)
+        offset_y = int(100 + i * 100)
         path = LineString([[100, offset_y], [CANVAS_DIMENSIONS[1] - 100, offset_y]]).segmentize(0.1)
         linestrings = font.lines_for_text(TEXT, FONT_SIZE, path=path, align=alignment)
         _draw_linestrings(canvas, linestrings)

@@ -15,6 +15,7 @@ def test_recursive_dict_merge():
     merged = lineworld._recursive_dict_merge(a, b)
     assert gt == merged
 
+
 def test_apply_config_to_object():
     """
     Test if the recursive dict merging of dicts with dataclass config objects

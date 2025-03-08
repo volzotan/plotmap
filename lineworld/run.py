@@ -8,11 +8,11 @@ from shapely.geometry import MultiPolygon
 from sqlalchemy import create_engine
 
 import lineworld
-from core import maptools
+from core import map
 from layers import contour
-from lineworld.core.maptools import DocumentInfo
+from lineworld.core.map import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities, contour2
+from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities, contour2, meta
 from lineworld.util.export import convert_svg_to_png
 
 
@@ -31,7 +31,7 @@ def run() -> None:
 
     config = lineworld.get_config()
     engine = create_engine(config["main"]["db_connection"])  # , echo=True)
-    document_info = maptools.DocumentInfo(config)
+    document_info = map.DocumentInfo(config)
 
     layer_grid_bathymetry = grid.GridBathymetry("GridBathymetry", engine, config)
     layer_grid_labels = grid.GridLabels("GridLabels", engine, config)
@@ -49,18 +49,18 @@ def run() -> None:
     layer_cities_circles = cities.CitiesCircles("CitiesCircles", engine, config)
 
     layer_labels = labels.Labels("Labels", engine, config)
+    layer_meta = meta.Meta("Meta", engine, config)
 
     compute_layers = [
         layer_bathymetry,
-        # layer_contour2,
+        layer_contour2,
         # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
         # layer_labels,
         # layer_grid_bathymetry,
         # layer_grid_labels,
-        # layer_bathymetry2,
-        # layer_contour,
+        # layer_meta,
     ]
 
     for layer in compute_layers:
@@ -96,15 +96,16 @@ def run() -> None:
     # pr.dump_stats('profile.pstat')
 
     visible_layers = [
-        # layer_cities_labels,
-        # layer_cities_circles,
-        # layer_grid_labels,
-        # layer_labels,
-        # layer_coastlines,
-        # layer_contour2,
-        # layer_grid_bathymetry,
-        layer_bathymetry,
+        # layer_meta,
+        layer_cities_labels,
+        layer_cities_circles,
+        layer_grid_labels,
+        layer_labels,
+        layer_coastlines,
+        layer_contour2,
         # layer_contour,
+        layer_grid_bathymetry,
+        layer_bathymetry,
         # layer_bathymetry2,
     ]
 
@@ -126,7 +127,7 @@ def run() -> None:
         svg_filename += ".svg"
 
     svg = SvgWriter(svg_filename, document_info.get_document_size())
-    svg.background_color = "white"
+    svg.background_color = config.get("svg_background_color", "#FFFFFF")
 
     # options_bathymetry = {
     #     "fill": "none",
@@ -199,6 +200,12 @@ def run() -> None:
         "stroke-width": "0.5",
     }
 
+    layer_styles[layer_meta.layer_id] = {
+        "fill": "none",
+        "stroke": "black",
+        "stroke-width": "0.5",
+    }
+
     layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
     layer_styles[layer_contour2.layer_id] = layer_styles[layer_contour.layer_id]
 
@@ -208,21 +215,21 @@ def run() -> None:
     for k, v in draw_objects.items():
         svg.add(k, v)  # , options=layer_styles.get(k.lower(), {}))
 
-    tanaka_style = {
-        "fill": "none",
-        "stroke-width": "0.40",
-        "fill-opacity": "1.0",
-    }
-    svg.add(
-        "Contours2_High",
-        layer_contour2.out_tanaka([], document_info, highlights=True)[0],
-        {**tanaka_style, "stroke": "#999999"},
-    )
-    svg.add(
-        "Contours2_Low",
-        layer_contour2.out_tanaka([], document_info, highlights=False)[0],
-        {**tanaka_style, "stroke": "black"},
-    )
+    # tanaka_style = {
+    #     "fill": "none",
+    #     "stroke-width": "0.40",
+    #     "fill-opacity": "1.0",
+    # }
+    # svg.add(
+    #     "Contours2_High",
+    #     layer_contour2.out_tanaka(exclude, document_info, highlights=True)[0],
+    #     {**tanaka_style, "stroke": "#999999"},
+    # )
+    # svg.add(
+    #     "Contours2_Low",
+    #     layer_contour2.out_tanaka(exclude, document_info, highlights=False)[0],
+    #     {**tanaka_style, "stroke": "black"},
+    # )
 
     svg.write()
     try:
