@@ -62,6 +62,41 @@ class FlowlineHatcherConfig:
     VIZ_LINE_THICKNESS: int = 5
 
 
+def _compute(
+        p: Polygon,
+        crop: np.ndarray,
+        mappings: np.ndarray,
+        config: FlowlineHatcherConfig,
+        xoff: float,
+        yoff: float,
+) -> list[LineString]:
+
+    hatcher = FlowlineHatcher(
+        p,
+        crop,
+        cv2.resize(mappings, [int(crop.shape[0]*10), int(crop.shape[1]*10)]),
+        config)
+
+    linestrings = hatcher.hatch()
+    del hatcher
+    linestrings = [shapely.affinity.translate(ls, xoff=xoff, yoff=yoff) for ls in linestrings]
+
+    linestrings_cropped = []
+    for ls in linestrings:
+        cropped = shapely.intersection(ls, p)
+
+        if type(cropped) is Point:
+            pass
+        elif type(cropped) is MultiLineString:
+            g = geometrytools.unpack_multilinestring(cropped)
+            linestrings_cropped += g
+        else:
+            linestrings_cropped.append(cropped)
+
+    linestrings = list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
+
+    return linestrings
+
 class FlowlineTilerPoly:
     def __init__(
         self,
@@ -83,12 +118,14 @@ class FlowlineTilerPoly:
             if self.config.MM_TO_PX_CONVERSION_FACTOR * self.config.LINE_STEP_DISTANCE < 1:
                 raise Exception("elevation raster data too coarse for LINE_DISTANCE config settings")
 
-        self.tiles = [{
-            "linestrings": []
-        } for _ in polygons]
+        self.tiles = [{"linestrings": []} for _ in polygons]
 
     def hatch(self) -> list[LineString]:
-        cluster = LocalCluster(n_workers=4, threads_per_worker=1, memory_limit="6GB")
+
+        BATCH_SIZE = 4
+        batches = [list(range(len(self.polygons))[i:i + BATCH_SIZE]) for i in range(0, len(self.polygons), BATCH_SIZE)]
+
+        cluster = LocalCluster(n_workers=BATCH_SIZE, threads_per_worker=1, memory_limit="6GB")
         client = cluster.get_client()
 
         # import coiled
@@ -119,63 +156,37 @@ class FlowlineTilerPoly:
         # coiled, 3 workers
         # 2025-01-16 22:49:54.305 | DEBUG    | __main__:run:86 - draw in 608.36s
 
-        for i, p in enumerate(self.polygons):
-            logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i/len(self.polygons)*100.0:5.2f}%")
 
-            min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
-            max_col += 1
-            max_row += 1
+        for batch in batches:
+            for i in batch:
+                p = self.polygons[i]
+                logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i/len(self.polygons)*100.0:5.2f}%")
 
-            if max_row - min_row < 10 or max_col - min_col < 10:
-                logger.warning(f"empty tile {p}")
-                continue
+                min_col, min_row, max_col, max_row = [int((e//10)*10) for e in shapely.bounds(p).tolist()]
+                max_col += 10
+                max_row += 10
 
-            elevation_tile = self.elevation[min_row:max_row, min_col:max_col]
-            mappings_tile = self.mappings[min_row:max_row, min_col:max_col, :]
+                if max_row - min_row < 10 or max_col - min_col < 10:
+                    logger.warning(f"empty tile {p}")
+                    continue
 
-            def compute(
-                p: Polygon,
-                crop: np.ndarray,
-                mappings: np.ndarray,
-                config: FlowlineHatcherConfig,
-                xoff: float,
-                yoff: float,
-            ) -> list[LineString]:
-                hatcher = FlowlineHatcher(p, crop, mappings, config)
-                linestrings = hatcher.hatch()
-                del hatcher
-                linestrings = [shapely.affinity.translate(ls, xoff=xoff, yoff=yoff) for ls in linestrings]
+                elevation_tile = self.elevation[min_row:max_row, min_col:max_col]
+                mappings_tile = self.mappings[min_row//10:max_row//10, min_col//10:max_col//10, :]
 
-                linestrings_cropped = []
-                for ls in linestrings:
-                    cropped = shapely.intersection(ls, p)
-
-                    if type(cropped) is Point:
-                        pass
-                    elif type(cropped) is MultiLineString:
-                        g = geometrytools.unpack_multilinestring(cropped)
-                        linestrings_cropped += g
-                    else:
-                        linestrings_cropped.append(cropped)
-
-                linestrings = list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
-
-                return linestrings
-
-            futures.append(
-                client.submit(
-                    compute,
-                    p,
-                    np.copy(elevation_tile),
-                    np.copy(mappings_tile),
-                    self.config,
-                    min_col,
-                    min_row,
+                futures.append(
+                    client.submit(
+                        _compute,
+                        p,
+                        np.copy(elevation_tile),
+                        np.copy(mappings_tile),
+                        self.config,
+                        min_col,
+                        min_row,
+                    )
                 )
-            )
 
-        for i, f in enumerate(futures):
-            self.tiles[i]["linestrings"] = f.result()
+            for i, f in enumerate(futures):
+                self.tiles[i]["linestrings"] = f.result()
 
         linestrings = []
         for tile in self.tiles:
@@ -705,7 +716,7 @@ class FlowlineHatcher:
 
 if __name__ == "__main__":
     ELEVATION_FILE = Path("experiments/hatching/data/gebco_crop.tif")
-    OUTPUT_PATH = Path("experiments/hatching/output")
+    OUTPUT_PATH = Path(".")
     RESIZE_SIZE = (3000, 3000)
 
     timer_total_runtime = datetime.datetime.now()
