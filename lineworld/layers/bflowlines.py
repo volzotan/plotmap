@@ -204,6 +204,18 @@ class BathymetryFlowlines(Layer):
         mapping_distance = density  # uint8
         mapping_max_segments = win_var  # uint8
 
+        if self.config.get("blur_angles", False):
+            kernel_size = self.config.get("blur_angles_kernel_size", 10)
+            mapping_angle = cv2.blur(mapping_angle, (kernel_size, kernel_size))
+
+        if self.config.get("blur_distance", False):
+            kernel_size = self.config.get("blur_distance_kernel_size", 10)
+            mapping_distance = cv2.blur(mapping_distance, (kernel_size, kernel_size))
+
+        if self.config.get("blur_length", False):
+            kernel_size = self.config.get("blur_length_kernel_size", 10)
+            mapping_max_segments = cv2.blur(mapping_max_segments, (kernel_size, kernel_size))
+
         mappings = [mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments]
 
         tiler = None

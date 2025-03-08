@@ -43,14 +43,14 @@ class FlowlineHatcherConfig:
 
     LINE_MAX_SEGMENTS: tuple[int, int] = (10, 50)
 
-    BLUR_ANGLES: bool = True
-    BLUR_ANGLES_KERNEL_SIZE: int = 40
-
-    BLUR_INCLINATION: bool = True
-    BLUR_INCLINATION_KERNEL_SIZE: int = 10
-
-    BLUR_MAPPING_DISTANCE: bool = True
-    BLUR_MAPPING_DISTANCE_KERNEL_SIZE: int = 10
+    # BLUR_ANGLES: bool = True
+    # BLUR_ANGLES_KERNEL_SIZE: int = 40
+    #
+    # BLUR_INCLINATION: bool = True
+    # BLUR_INCLINATION_KERNEL_SIZE: int = 10
+    #
+    # BLUR_MAPPING_DISTANCE: bool = True
+    # BLUR_MAPPING_DISTANCE_KERNEL_SIZE: int = 10
 
     SCALE_ADJUSTMENT_VALUE: float = 0.3
 
@@ -371,7 +371,7 @@ class FlowlineHatcher:
             math.ceil(self.bbox[3] - self.bbox[1]) + 1,
         ]  # minx, miny, maxx, maxy
 
-        self.MAPPING_FACTOR = 2 # mapping rasters scaled to n pixels per millimeter
+        self.MAPPING_FACTOR = 2  # mapping rasters scaled to n pixels per millimeter
         scaled_mappings = [
             cv2.resize(m, [int(self.bbox[2] * self.MAPPING_FACTOR), int(self.bbox[3] * self.MAPPING_FACTOR)])
             for m in mappings
@@ -386,10 +386,9 @@ class FlowlineHatcher:
         self.tile_name = tile_name
 
         if self.config.COLLISION_APPROXIMATE:
-            self.MAPPING_FACTOR_COLLISION = int(math.ceil(1/self.config.LINE_DISTANCE[0]))
+            self.MAPPING_FACTOR_COLLISION = int(math.ceil(1 / self.config.LINE_DISTANCE[0]))
             self.point_raster = np.zeros(
-                [self.bbox[3]*self.MAPPING_FACTOR_COLLISION, self.bbox[2]*self.MAPPING_FACTOR_COLLISION],
-                dtype=bool
+                [self.bbox[3] * self.MAPPING_FACTOR_COLLISION, self.bbox[2] * self.MAPPING_FACTOR_COLLISION], dtype=bool
             )
         else:
             self.point_bins = []
@@ -425,8 +424,8 @@ class FlowlineHatcher:
 
         min_d = int(self._map_line_distance(x, y) * factor * self.MAPPING_FACTOR_COLLISION)
 
-        rm_x = int(x *self.MAPPING_FACTOR_COLLISION)
-        rm_y = int(y *self.MAPPING_FACTOR_COLLISION)
+        rm_x = int(x * self.MAPPING_FACTOR_COLLISION)
+        rm_y = int(y * self.MAPPING_FACTOR_COLLISION)
 
         return np.any(
             self.point_raster[
@@ -440,13 +439,11 @@ class FlowlineHatcher:
         bin_pos = [int(x / self.bin_size), int(y / self.bin_size)]
 
         bins = [
-            [bin_pos[0], bin_pos[1]-1],
-
-            [bin_pos[0]-1, bin_pos[1]],
+            [bin_pos[0], bin_pos[1] - 1],
+            [bin_pos[0] - 1, bin_pos[1]],
             [bin_pos[0], bin_pos[1]],
-            [bin_pos[0]+1, bin_pos[1]],
-
-            [bin_pos[0], bin_pos[1]+1],
+            [bin_pos[0] + 1, bin_pos[1]],
+            [bin_pos[0], bin_pos[1] + 1],
         ]
 
         for ix, iy in bins:
@@ -619,7 +616,9 @@ class FlowlineHatcher:
                 x = int(lp[0])
                 y = int(lp[1])
                 if self.config.COLLISION_APPROXIMATE:
-                    self.point_raster[int(y*self.MAPPING_FACTOR_COLLISION), int(x*self.MAPPING_FACTOR_COLLISION)] = True
+                    self.point_raster[
+                        int(y * self.MAPPING_FACTOR_COLLISION), int(x * self.MAPPING_FACTOR_COLLISION)
+                    ] = True
                 else:
                     # self.point_map[f"{x},{y}"].append(lp)
                     # self.point_bins[int(x/self.bin_size)][int(y/self.bin_size)].append(lp)
@@ -649,7 +648,6 @@ def _test_squaretiler(OUTPUT_PATH, RESIZE_SIZE):
 
     elevation = None
     with rasterio.open(str(ELEVATION_FILE)) as dataset:
-
         elevation = dataset.read()[0]
 
     elevation = cv2.resize(elevation, RESIZE_SIZE)
@@ -684,7 +682,7 @@ def _test_squaretiler(OUTPUT_PATH, RESIZE_SIZE):
 
     config.COLLISION_APPROXIMATE = True
     config.LINE_DISTANCE = [2.0, 10.0]
-    config.LINE_MAX_SEGMENTS= (100, 500)
+    config.LINE_MAX_SEGMENTS = (100, 500)
     tiler = FlowlineTiler([mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments], config, (2, 2))
     linestrings = tiler.hatch()
 
@@ -730,11 +728,11 @@ def _test_polytiler(OUTPUT_PATH, RESIZE_SIZE):
 
     config.COLLISION_APPROXIMATE = True
     config.LINE_DISTANCE = [0.3, 10.0]
-    config.LINE_MAX_SEGMENTS= (100, 500)
+    config.LINE_MAX_SEGMENTS = (100, 500)
     tiler = FlowlineTilerPoly(
         [mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments],
         config,
-        [Point([RESIZE_SIZE[0]//2, RESIZE_SIZE[0]//2]).buffer(min(RESIZE_SIZE)*0.49)]
+        [Point([RESIZE_SIZE[0] // 2, RESIZE_SIZE[0] // 2]).buffer(min(RESIZE_SIZE) * 0.49)],
     )
     linestrings = tiler.hatch()
 
@@ -755,7 +753,6 @@ if __name__ == "__main__":
     pr.disable()
     pr.dump_stats("profile.pstat")
     logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")
-
 
     svg_path = Path(OUTPUT_PATH, "flowlines.svg")
     svg = SvgWriter(svg_path, RESIZE_SIZE)
