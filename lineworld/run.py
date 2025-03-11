@@ -127,7 +127,7 @@ def run() -> None:
         svg_filename += ".svg"
 
     svg = SvgWriter(svg_filename, document_info.get_document_size())
-    svg.background_color = config.get("svg_background_color", "#FFFFFF")
+    # svg.background_color = config.get("svg_background_color", "#333333")
 
     # options_bathymetry = {
     #     "fill": "none",
@@ -233,7 +233,7 @@ def run() -> None:
 
     svg.write()
     try:
-        convert_svg_to_png(svg_filename, svg.dimensions[0] * 10)
+        convert_svg_to_png(svg, svg.dimensions[0] * 10)
     except Exception as e:
         logger.warning(f"SVG to PNG conversion failed: {e}")
 

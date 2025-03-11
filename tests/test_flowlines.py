@@ -80,7 +80,7 @@ def test_flowlines_tiler_square(
     svg.add("flowlines", linestrings, options=options)
     svg.write()
 
-    convert_svg_to_png(svg_path, svg.dimensions[0] * 10)
+    convert_svg_to_png(svg, svg.dimensions[0] * 10)
 
 
 def test_flowlines_tiler_poly(
@@ -99,4 +99,4 @@ def test_flowlines_tiler_poly(
     svg.add("flowlines", linestrings, options=options)
     svg.write()
 
-    convert_svg_to_png(svg_path, svg.dimensions[0] * 10)
+    convert_svg_to_png(svg, svg.dimensions[0] * 10)

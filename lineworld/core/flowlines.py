@@ -762,7 +762,7 @@ if __name__ == "__main__":
     svg.write()
 
     try:
-        convert_svg_to_png(svg_path, svg.dimensions[0] * 10)
+        convert_svg_to_png(svg, svg.dimensions[0] * 10)
     except Exception as e:
         logger.warning(f"SVG to PNG conversion failed: {e}")
 
