@@ -40,7 +40,7 @@ SCRIPT_OUTPUT_IMAGE_PATH = "LineWorldBasicConfig.svg"
 OUTPUT_DIR = "experiments/conductor"
 
 FFMPEG_TEMP_FILE = Path(OUTPUT_DIR, "ffmpeg_mux_file.txt")
-FFMPEG_OUTPUT_FILE = Path(OUTPUT_DIR, f"{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4")
+FFMPEG_OUTPUT_FILE = Path(OUTPUT_DIR, f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.mp4")
 FFMPEG_DURATION = 1
 
 INKSCAPE_CONVERSION_SUFFIX = ".png"
@@ -132,7 +132,7 @@ for variable_state in VARIABLE_STATES:
 
     cv2.putText(
         img_annotated,
-        f"{datetime.datetime.now().strftime("%Y %m %d | %H:%M:%S")}",
+        f"{datetime.datetime.now().strftime('%Y %m %d | %H:%M:%S')}",
         (10, img.shape[0] + 80),
         FONT_NAME,
         FONT_SCALE,
@@ -140,7 +140,7 @@ for variable_state in VARIABLE_STATES:
         FONT_THICKNESS,
     )
 
-    output_filename = f"{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_VAR_{variable_name}_{variable_state_printable}{experiment_output_image_path.suffix}"
+    output_filename = f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_VAR_{variable_name}_{variable_state_printable}{experiment_output_image_path.suffix}"
     img_annotated_path = Path(OUTPUT_DIR, output_filename)
     cv2.imwrite(str(img_annotated_path), img_annotated)
 
@@ -159,9 +159,9 @@ logger.info(f"total experiment runtime: {total_runtime:>6.2f}s")
 
 with open(FFMPEG_TEMP_FILE, "w") as file:
     for res in overview:
-        file.write(f"file '{res["image"].name}'\n")
+        file.write(f"file '{res['image'].name}'\n")
         file.write(f"duration {FFMPEG_DURATION}\n")
-    file.write(f"file '{overview[-1]["image"].name}'\n")
+    file.write(f"file '{overview[-1]['image'].name}'\n")
 
 # ffmpeg -f concat -i input.txt -vsync vfr -pix_fmt yuv420p output.mp4
 

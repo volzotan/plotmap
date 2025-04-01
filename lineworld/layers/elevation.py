@@ -3,19 +3,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import rasterio
 from loguru import logger
 import numpy as np
 import shapely
-from core.map import DocumentInfo, Projection
+from lineworld.core.map import DocumentInfo, Projection
 from geoalchemy2 import WKBElement
 from geoalchemy2.shape import from_shape, to_shape
-from layers.layer import Layer
+from lineworld.layers.layer import Layer
 from shapely import to_wkt, Polygon, MultiLineString, MultiPolygon
 from shapely.affinity import affine_transform, translate
 from sqlalchemy import engine
 from sqlalchemy import insert
 from sqlalchemy import text
-from util import gebco_grid_to_polygon
+from lineworld.util import gebco_grid_to_polygon
 
 from lineworld.util.geometrytools import process_polygons, unpack_multipolygon
 
@@ -168,7 +169,12 @@ class ElevationLayer(Layer):
         for dataset_file in [self.mosaic_file]:
             logger.info(f"converting raster data to elevation contour polygons: {dataset_file})")
 
-            converted_layers = gebco_grid_to_polygon.convert(dataset_file, layer_elevation_bounds, allow_overlap=True)
+            with rasterio.open(dataset_file) as dataset:
+                band = dataset.read(1)
+
+                converted_layers = gebco_grid_to_polygon.convert(
+                    dataset, band, layer_elevation_bounds, allow_overlap=True
+                )
 
             for layer_index in range(len(converted_layers)):
                 polys = process_polygons(

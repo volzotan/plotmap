@@ -158,7 +158,7 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                     case Align.CENTER:
                         path_coords = [[lon - 25, lat], [lon + 25, lat]]
                     case _:
-                        raise Exception(f"unexpected enum state align: {positions[k]["align"]}")
+                        raise Exception(f"unexpected enum state align: {positions[k]['align']}")
 
                 path = LineString(path_coords).segmentize(0.1)
                 path = transform(project_func, path)
@@ -211,7 +211,7 @@ def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]
             continue
         cities_cleaned.append(c)
 
-    logger.info(f"removed during collision checking: {len(cities)-len(cities_cleaned)}")
+    logger.info(f"removed during collision checking: {len(cities) - len(cities_cleaned)}")
 
     cities = cities_cleaned
 
@@ -248,7 +248,7 @@ def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]
     for region in regions:
         _anneal(cities, region, config)
 
-    logger.info(f"anneal total time: {(datetime.datetime.now()-timer_start).total_seconds():5.2f}")
+    logger.info(f"anneal total time: {(datetime.datetime.now() - timer_start).total_seconds():5.2f}")
 
     # remove collisions
 

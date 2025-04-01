@@ -59,7 +59,7 @@ def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatch
     mapping_max_segments = cv2.blur(mapping_max_segments, (10, 10))
 
     cv2.imwrite(str(Path(output_path, "mapping_angle.png")), normalize_to_uint8(mapping_angle / math.tau))
-    cv2.imwrite(str(Path(output_path, "mapping_non_flat.png")), mapping_non_flat.astype(np.uint8) * 255)
+    cv2.imwrite(str(Path(output_path, "mapping_non_flat.png")), mapping_non_flat)
     cv2.imwrite(str(Path(output_path, "mapping_distance.png")), mapping_distance)
     cv2.imwrite(str(Path(output_path, "mapping_max_segments.png")), mapping_max_segments)
 

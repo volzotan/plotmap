@@ -178,7 +178,7 @@ class HersheyFont:
                 )
 
                 if match is None:
-                    logger.warning(f"path length insufficient, failed to draw glyph {g["char"]}")
+                    logger.warning(f"path length insufficient, failed to draw glyph {g['char']}")
                     continue
 
                 matching_point, angle = match
@@ -205,7 +205,7 @@ class HersheyFont:
             match = self._find_matching_line_point(path, anchor_x, anchor_x + g["width"], reverse=True)
 
             if match is None:
-                logger.warning(f"path length insufficient, failed to draw glyph {g["char"]}")
+                logger.warning(f"path length insufficient, failed to draw glyph {g['char']}")
                 continue
 
             matching_point, angle = match

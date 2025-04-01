@@ -252,7 +252,7 @@ if __name__ == "__main__":
                 printProgressBar(
                     i,
                     len(layer),
-                    prefix=f"process layer: {layer.attrib.get("id", "UNNAMED_LAYER"):<25}",
+                    prefix=f"process layer: {layer.attrib.get('id', 'UNNAMED_LAYER'):<25}",
                 )
 
             lines = process(child, svg_default_namespace)
@@ -560,7 +560,7 @@ if __name__ == "__main__":
 
     for s in range(0, len(segments)):
         segment = segments[s]
-        filename = output_filename + f"_{s+1}of{len(segments)}.nc"
+        filename = output_filename + f"_{s + 1}of{len(segments)}.nc"
 
         distance_travelled = 0
 
@@ -651,13 +651,13 @@ if __name__ == "__main__":
             # out.write("G1 Z0 F{}\n".format(PEN_LIFT_SPEED))
             # count_pen_down += 1
 
-        print(f"write segment {s+1}/{len(segments)}: {filename}")
+        print(f"write segment {s + 1}/{len(segments)}: {filename}")
 
     print(f"count_pen_up:        {count_pen_up:>5}")
     print(f"count_pen_down:      {count_pen_down:>5}")
     print(f"count_draw_moves:    {count_draw_moves:>5}")
     print(f"count_travel_moves:  {count_travel_moves:>5}")
-    print(f"ratio draw/travel:   {float(count_draw_moves)/float(count_travel_moves):>5.3f}")
+    print(f"ratio draw/travel:   {float(count_draw_moves) / float(count_travel_moves):>5.3f}")
 
     if args.dip_mode:
         print(f"count dip:           {count_pen_up:>5}")
