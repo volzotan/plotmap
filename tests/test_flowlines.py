@@ -8,7 +8,7 @@ import rasterio
 from scipy import ndimage
 from shapely import Point
 
-from lineworld.core.flowlines import FlowlineHatcherConfig, FlowlineTiler, FlowlineTilerPoly
+from lineworld.core.flowlines import FlowlineHatcherConfig, FlowlineTiler, FlowlineTilerPoly, Mapping
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util.export import convert_svg_to_png
 from lineworld.util.rastertools import normalize_to_uint8
@@ -40,34 +40,43 @@ def flow_config() -> FlowlineHatcherConfig:
 
 
 @pytest.fixture
-def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatcherConfig) -> list[np.ndarray]:
+def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatcherConfig) -> dict[Mapping, np.ndarray]:
     elevation[elevation > 0] = 0  # bathymetry data only
 
     _, _, _, _, angles, inclination = get_slope(elevation, 1)
 
-    mapping_angle = angles  # float
+    # uint8 image must be centered around 128 to deal with negative values
+    mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
 
     mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
     mapping_non_flat[inclination > flow_config.MIN_INCLINATION] = 255  # uint8
 
     mapping_distance = normalize_to_uint8(elevation)  # uint8
 
-    mapping_max_segments = np.full_like(angles, int(255 / 2))
+    mapping_max_length = np.full_like(angles, int(255 / 2))
 
     mapping_angle = cv2.blur(mapping_angle, (10, 10))
     mapping_distance = cv2.blur(mapping_distance, (10, 10))
-    mapping_max_segments = cv2.blur(mapping_max_segments, (10, 10))
+    mapping_max_length = cv2.blur(mapping_max_length, (10, 10))
 
     cv2.imwrite(str(Path(output_path, "mapping_angle.png")), normalize_to_uint8(mapping_angle / math.tau))
     cv2.imwrite(str(Path(output_path, "mapping_non_flat.png")), mapping_non_flat)
     cv2.imwrite(str(Path(output_path, "mapping_distance.png")), mapping_distance)
-    cv2.imwrite(str(Path(output_path, "mapping_max_segments.png")), mapping_max_segments)
+    cv2.imwrite(str(Path(output_path, "mapping_max_segments.png")), mapping_max_length)
 
-    return [mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments]
+    return {
+        Mapping.DISTANCE: mapping_distance,
+        Mapping.ANGLE: mapping_angle,
+        Mapping.MAX_LENGTH: mapping_max_length,
+        Mapping.NON_FLAT: mapping_non_flat,
+    }
 
 
 def test_flowlines_tiler_square(
-    mapping: list[np.ndarray], output_path: Path, resize_size: tuple[float | int], flow_config: FlowlineHatcherConfig
+    mapping: dict[str, np.ndarray],
+    output_path: Path,
+    resize_size: tuple[float | int],
+    flow_config: FlowlineHatcherConfig,
 ):
     flow_config.COLLISION_APPROXIMATE = True
 
@@ -84,7 +93,10 @@ def test_flowlines_tiler_square(
 
 
 def test_flowlines_tiler_poly(
-    mapping: list[np.ndarray], output_path: Path, resize_size: tuple[float | int], flow_config: FlowlineHatcherConfig
+    mapping: dict[str, np.ndarray],
+    output_path: Path,
+    resize_size: tuple[float | int],
+    flow_config: FlowlineHatcherConfig,
 ):
     flow_config.COLLISION_APPROXIMATE = True
 

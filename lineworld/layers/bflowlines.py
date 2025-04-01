@@ -1,3 +1,4 @@
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,7 @@ from rasterio.warp import (
 
 import lineworld
 from lineworld.core import flowlines
-from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPoly, FlowlineTilerPolyRust
+from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPoly, FlowlineTilerPolyRust, Mapping
 from lineworld.util.gebco_grid_to_polygon import _calculate_topographic_position_index
 from lineworld.util.rastertools import normalize_to_uint8
 from lineworld.util.slope import get_slope
@@ -198,11 +199,15 @@ class BathymetryFlowlines(Layer):
         win_var = win_var * -1 + MAX_WIN_VAR
         win_var = (np.iinfo(np.uint8).max * ((win_var - np.min(win_var)) / np.ptp(win_var))).astype(np.uint8)
 
-        mapping_angle = angles  # float
+        # uint8 image must be centered around 128 to deal with negative values
+        mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
+
         mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
         mapping_non_flat[inclination > flow_config.MIN_INCLINATION] = 255  # uint8
+
         mapping_distance = density  # uint8
-        mapping_max_segments = win_var  # uint8
+
+        mapping_line_max_length = win_var  # uint8
 
         if self.config.get("blur_angles", False):
             kernel_size = self.config.get("blur_angles_kernel_size", 10)
@@ -214,9 +219,14 @@ class BathymetryFlowlines(Layer):
 
         if self.config.get("blur_length", False):
             kernel_size = self.config.get("blur_length_kernel_size", 10)
-            mapping_max_segments = cv2.blur(mapping_max_segments, (kernel_size, kernel_size))
+            mapping_line_max_length = cv2.blur(mapping_line_max_length, (kernel_size, kernel_size))
 
-        mappings = [mapping_angle, mapping_non_flat, mapping_distance, mapping_max_segments]
+        mappings = {
+            Mapping.DISTANCE: mapping_distance,
+            Mapping.ANGLE: mapping_angle,
+            Mapping.MAX_LENGTH: mapping_line_max_length,
+            Mapping.NON_FLAT: mapping_non_flat,
+        }
 
         tiler = None
         if self.tile_boundaries is not None and len(self.tile_boundaries) > 0:
@@ -225,8 +235,6 @@ class BathymetryFlowlines(Layer):
             raster_tile_boundaries = [affine_transform(boundary, mat) for boundary in self.tile_boundaries]
 
             # tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries)
-
-            mappings = [mapping_distance, mapping_angle, mapping_max_segments, mapping_non_flat]
             tiler = FlowlineTilerPolyRust(mappings, flow_config, raster_tile_boundaries)
         else:
             tiler = FlowlineTiler(
