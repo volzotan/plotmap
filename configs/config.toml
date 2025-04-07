@@ -2,7 +2,7 @@
 
 name = "LineWorldBasicConfig"
 
-debug = true
+debug = false
 projection = "VAN_DER_GRINTEN_I"
 wrapover = true
 
@@ -41,9 +41,12 @@ num_elevation_lines = 15
 num_tiles = 4
 line_distance = [0.4, 2.0]
 #line_distance = [2.0, 4.0]
+blur_density = true
+blur_density_kernel_size = 20
+blur_angles = true
 blur_angles_kernel_size = 25
-blur_inclination_kernel_size = 10
-blur_density_kernel_size = 25
+blur_length = true
+blur_length_kernel_size = 10
 line_distance_end_factor = 0.8
 
 [layer.CitiesLabels]

@@ -1,10 +1,11 @@
 import copy
 import os
 import tomllib
+from pathlib import Path
 from typing import Any
 from loguru import logger
 
-CONFIG_FILE = "config.toml"
+CONFIG_FILE = Path("configs", "config.toml")
 ENV_OVERWRITE_CONFIG = "LINEWORLD_CONFIG"
 
 
