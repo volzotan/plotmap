@@ -43,14 +43,14 @@ class FlowlineHatcherConfig:
     # distance between points constituting a line in mm
     LINE_STEP_DISTANCE: float = 0.3
 
+    LINE_MAX_LENGTH: tuple[int, int] = (10, 50)
+
     # max difference (in radians) in slope between line points
     MAX_ANGLE_DISCONTINUITY: float = math.pi / 2
     MIN_INCLINATION: float = 0.001  # 50.0
 
     # How many line segments should be skipped before the next seedpoint is extracted
     SEEDPOINT_EXTRACTION_SKIP_LINE_SEGMENTS: int = 5
-
-    LINE_MAX_LENGTH: tuple[int, int] = (10, 50)
 
     # SCALE_ADJUSTMENT_VALUE: float = 0.3
 
@@ -331,17 +331,13 @@ class FlowlineHatcher:
             math.ceil(self.bbox[3] - self.bbox[1]) + 1,
         ]  # minx, miny, maxx, maxy
 
-        self.MAPPING_FACTOR = 2  # mapping rasters scaled to n pixels per millimeter
+        self.scale_x = mappings[0].shape[1] / (self.bbox[2] + 0)
+        self.scale_y = mappings[0].shape[0] / (self.bbox[3] + 0)
 
-        scaled_mappings = [
-            cv2.resize(m, [int(self.bbox[2] * self.MAPPING_FACTOR), int(self.bbox[3] * self.MAPPING_FACTOR)])
-            for m in mappings
-        ]
-
-        self.distance = scaled_mappings[0]
-        self.angles = (scaled_mappings[1].astype(float) / 255.0) * math.tau - math.pi
-        self.max_length = scaled_mappings[2]
-        self.non_flat = scaled_mappings[3]
+        self.distance = mappings[0]
+        self.angles = (mappings[1].astype(float) / 255.0) * math.tau - math.pi
+        self.max_length = mappings[2]
+        self.non_flat = mappings[3]
 
         self.initial_seed_points = initial_seed_points
         self.tile_name = tile_name
@@ -360,21 +356,27 @@ class FlowlineHatcher:
             for x in range(self.num_bins_x):
                 self.point_bins.append([np.empty([0, 2], dtype=float)] * self.num_bins_y)
 
-    def _map_line_distance(self, x: int, y: int) -> float:
+    def _map_line_distance(self, x: float, y: float) -> float:
         return float(
             self.config.LINE_DISTANCE[0]
-            + self.distance[int(y * self.MAPPING_FACTOR), int(x * self.MAPPING_FACTOR)]
+            + self.distance[int(y * self.scale_y), int(x * self.scale_x)]
             / 255
             * (self.config.LINE_DISTANCE[1] - self.config.LINE_DISTANCE[0])
         )
 
-    def _map_line_max_length(self, x: int, y: int) -> float:
+    def _map_angle(self, x: float, y: float) -> float:
+        return float(self.angles[int(y * self.scale_y), int(x * self.scale_x)])
+
+    def _map_line_max_length(self, x: float, y: float) -> float:
         return float(
             self.config.LINE_MAX_LENGTH[0]
-            + self.max_length[(y * self.MAPPING_FACTOR), int(x * self.MAPPING_FACTOR)]
+            + self.max_length[(y * self.scale_y), int(x * self.scale_x)]
             / 255
             * (self.config.LINE_MAX_LENGTH[1] - self.config.LINE_MAX_LENGTH[0])
         )
+
+    def _map_non_flat(self, x: float, y: float) -> bool:
+        return self.non_flat[int(y * self.scale_y), int(x * self.scale_x)] == 0
 
     def _collision_approximate(self, x: float, y: float, factor: float) -> bool:
         if x >= self.bbox[2]:
@@ -432,12 +434,9 @@ class FlowlineHatcher:
             return self._collision_precise(x, y, factor)
 
     def _next_point(self, x1: float, y1: float, forwards: bool) -> tuple[float, float] | None:
-        rm_x1 = int(x1 * self.MAPPING_FACTOR)
-        rm_y1 = int(y1 * self.MAPPING_FACTOR)
+        a1 = self._map_angle(x1, y1)
 
-        a1 = self.angles[rm_y1, rm_x1]
-
-        if not self.non_flat[rm_y1, rm_x1] > 1:
+        if not self._map_non_flat(x1, y1) > 1:
             return None
 
         dir = 1
@@ -454,9 +453,7 @@ class FlowlineHatcher:
             return None
 
         if self.config.MAX_ANGLE_DISCONTINUITY > 0:
-            rm_x2 = int(x2 * self.MAPPING_FACTOR)
-            rm_y2 = int(y2 * self.MAPPING_FACTOR)
-            a2 = self.angles[rm_y2, rm_x2]
+            a2 = self._map_angle(x2, y2)
 
             if abs(a2 - a1) > self.config.MAX_ANGLE_DISCONTINUITY:
                 # print("MAX_ANGLE_DISCONTINUITY")
