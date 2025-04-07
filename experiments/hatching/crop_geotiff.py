@@ -17,7 +17,7 @@ OUTPUT_PATH = "data/gebco_crop.tif"
 
 CROP_SIZE = [10000, 10000]
 CENTER = [0.4, 0.4]
-CENTER = [0.6, 0.4]
+# CENTER = [0.6, 0.4]
 
 OUTPUT_SIZE = CROP_SIZE
 
