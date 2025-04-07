@@ -14,6 +14,9 @@ class Projection(Enum):
     ECKERT_IV = "ESRI", 54012
     VAN_DER_GRINTEN_I = "ESRI", 54029
 
+    def __str__(self):
+        return f"{self.value[0]}:{self.value[1]}"
+
 
 @dataclass
 class Pen:
@@ -55,8 +58,6 @@ class DocumentInfo:
         d = 0
         e = (1 / raster_height) * self.width
         xoff = self.offset_x
-
-        yoff = self.offset_y
         yoff = -(self.width - self.height) / 2 + self.offset_y
 
         return [a, b, d, e, xoff, yoff]

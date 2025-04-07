@@ -52,16 +52,7 @@ class FlowlineHatcherConfig:
 
     LINE_MAX_LENGTH: tuple[int, int] = (10, 50)
 
-    # BLUR_ANGLES: bool = True
-    # BLUR_ANGLES_KERNEL_SIZE: int = 40
-    #
-    # BLUR_INCLINATION: bool = True
-    # BLUR_INCLINATION_KERNEL_SIZE: int = 10
-    #
-    # BLUR_MAPPING_DISTANCE: bool = True
-    # BLUR_MAPPING_DISTANCE_KERNEL_SIZE: int = 10
-
-    SCALE_ADJUSTMENT_VALUE: float = 0.3
+    # SCALE_ADJUSTMENT_VALUE: float = 0.3
 
     COLLISION_APPROXIMATE: bool = True
     VIZ_LINE_THICKNESS: int = 5
@@ -113,6 +104,8 @@ class FlowlineTilerPolyRust:
             rust_config = flowlines_py.FlowlinesConfig()
             rust_config = _py_config_to_rust_config(self.config, rust_config)
 
+            dimensions = [max_col - min_col, max_row - min_row]
+
             tile_mappings = [
                 self.mappings[Mapping.DISTANCE],
                 self.mappings[Mapping.ANGLE],
@@ -121,7 +114,7 @@ class FlowlineTilerPolyRust:
             ]
             tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
 
-            rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(rust_config, *tile_mappings)
+            rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
             linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
 
             linestrings_cropped = []
@@ -241,7 +234,7 @@ class FlowlineTilerPoly:
 class FlowlineTiler:
     def __init__(
         self,
-        mappings: dict[Mapping, np.ndarray],
+        mappings: list[Mapping, np.ndarray],
         config: FlowlineHatcherConfig,
         num_tiles: tuple[int, int],
     ):
@@ -283,7 +276,7 @@ class FlowlineTiler:
                         for x in point_raster_top[-2, :].nonzero()[0]:
                             initial_seed_points.append((x, 0))
                 else:
-                    pass  # TODO
+                    raise NotImplementedError()
 
                 tile_mappings = [
                     self.mappings[Mapping.DISTANCE],
@@ -322,7 +315,7 @@ class FlowlineHatcher:
     def __init__(
         self,
         polygon: Polygon,
-        mappings: dict[str, np.ndarray],
+        mappings: list[np.ndarray],
         config: FlowlineHatcherConfig,
         initial_seed_points: list[tuple[float, float]] = [],
         tile_name: str = "",
@@ -346,8 +339,8 @@ class FlowlineHatcher:
         ]
 
         self.distance = scaled_mappings[0]
-        self.angles = scaled_mappings[1]
-        self.max_segments = scaled_mappings[2]
+        self.angles = (scaled_mappings[1].astype(float) / 255.0) * math.tau - math.pi
+        self.max_length = scaled_mappings[2]
         self.non_flat = scaled_mappings[3]
 
         self.initial_seed_points = initial_seed_points
@@ -378,7 +371,7 @@ class FlowlineHatcher:
     def _map_line_max_length(self, x: int, y: int) -> float:
         return float(
             self.config.LINE_MAX_LENGTH[0]
-            + self.max_segments[(y * self.MAPPING_FACTOR), int(x * self.MAPPING_FACTOR)]
+            + self.max_length[(y * self.MAPPING_FACTOR), int(x * self.MAPPING_FACTOR)]
             / 255
             * (self.config.LINE_MAX_LENGTH[1] - self.config.LINE_MAX_LENGTH[0])
         )
@@ -622,7 +615,7 @@ def _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE) -> dict[Mapping, np.ndarray]:
     mapping_distance = normalize_to_uint8(elevation)  # uint8
     mapping_max_length = win_var  # uint8
 
-    mapping_angle = cv2.blur(mapping_angle, (10, 10))
+    mapping_angle = cv2.blur(mapping_angle, (40, 40))
     mapping_distance = cv2.blur(mapping_distance, (10, 10))
     mapping_max_length = cv2.blur(mapping_max_length, (10, 10))
 
@@ -630,10 +623,6 @@ def _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE) -> dict[Mapping, np.ndarray]:
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_non_flat.png")), mapping_non_flat.astype(np.uint8) * 255)
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_distance.png")), mapping_distance)
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_max_segments.png")), mapping_max_length)
-
-    config.COLLISION_APPROXIMATE = True
-    config.LINE_DISTANCE = [2.0, 10.0]
-    config.LINE_MAX_LENGTH = (50, 200)
 
     mappings = {
         Mapping.DISTANCE: mapping_distance,

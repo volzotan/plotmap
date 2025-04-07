@@ -14,7 +14,7 @@ from geoalchemy2.shape import to_shape, from_shape
 from lineworld.layers.layer import Layer
 from loguru import logger
 from scipy import ndimage
-from shapely import Polygon, MultiLineString, STRtree
+from shapely import Polygon, MultiLineString, STRtree, LineString, GeometryCollection
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
 from sqlalchemy import Table, Column, Integer
@@ -231,8 +231,12 @@ class BathymetryFlowlines(Layer):
         tiler = None
         if self.tile_boundaries is not None and len(self.tile_boundaries) > 0:
             # convert from map coordinates to raster pixel coordinates
-            mat = document_info.get_transformation_matrix_map_to_raster(elevation.shape[1], elevation.shape[0])
-            raster_tile_boundaries = [affine_transform(boundary, mat) for boundary in self.tile_boundaries]
+            mat_map_to_raster = document_info.get_transformation_matrix_map_to_raster(
+                elevation.shape[1], elevation.shape[0]
+            )
+            raster_tile_boundaries = [
+                affine_transform(boundary, mat_map_to_raster) for boundary in self.tile_boundaries
+            ]
 
             # tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries)
             tiler = FlowlineTilerPolyRust(mappings, flow_config, raster_tile_boundaries)
@@ -246,11 +250,26 @@ class BathymetryFlowlines(Layer):
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates
-        mat = document_info.get_transformation_matrix_raster_to_map(elevation.shape[1], elevation.shape[0])
-        linestrings = [affine_transform(line, mat) for line in linestrings]
+        mat_raster_to_map = document_info.get_transformation_matrix_raster_to_map(
+            elevation.shape[1], elevation.shape[0]
+        )
+        linestrings = [affine_transform(line, mat_raster_to_map) for line in linestrings]
         linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
-        return [BathymetryFlowlinesMapLines(None, line) for line in linestrings]
+        # TODO: this should be a function in geometrytools
+        linestrings_filtered = []
+        for g in linestrings:
+            match g:
+                case LineString():
+                    linestrings_filtered.append(g)
+                case GeometryCollection():
+                    for sg in g.geoms:
+                        if type(sg) is LineString:
+                            linestrings_filtered.append(sg)
+                case _:
+                    logger.warning(f"unexpected geometry type during filtering: {type(g)}")
+
+        return [BathymetryFlowlinesMapLines(None, line) for line in linestrings_filtered]
 
     def load(self, geometries: list[BathymetryFlowlinesMapLines]) -> None:
         if geometries is None:
