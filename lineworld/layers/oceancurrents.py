@@ -9,13 +9,11 @@ import geoalchemy2
 import numpy as np
 import rasterio
 import shapely
-from flowlines_py import flowlines_py
 
 from lineworld.core.map import DocumentInfo, Projection
 from geoalchemy2.shape import to_shape, from_shape
 from lineworld.layers.layer import Layer
 from loguru import logger
-from scipy import ndimage
 from shapely import Polygon, MultiLineString, STRtree, LineString, GeometryCollection
 from shapely.affinity import affine_transform
 from sqlalchemy import MetaData
@@ -28,7 +26,6 @@ from rasterio.warp import (
     calculate_default_transform,
     reproject,
     Resampling,
-    transform_bounds,
 )
 import netCDF4
 
@@ -36,7 +33,6 @@ import lineworld
 from lineworld.core import flowlines
 from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPolyRust, Mapping, _py_config_to_rust_config
 from lineworld.util.rastertools import normalize_to_uint8
-from lineworld.util.slope import get_slope
 
 
 @dataclass
@@ -159,7 +155,6 @@ class OceanCurrents(Layer):
             magnitude = np.hypot(u, v)
 
             angles = (angles + math.pi / 2) % math.tau
-
             # center around math.pi (128) so we avoid negative values
             mapping_angle = angles + math.pi
             mapping_angle = ((mapping_angle / math.tau) * 255).astype(np.uint8)
