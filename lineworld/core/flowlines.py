@@ -1,8 +1,10 @@
+import concurrent
 import datetime
 import itertools
 import math
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -22,6 +24,8 @@ from lineworld.util.export import convert_svg_to_png
 from lineworld.util.rastertools import normalize_to_uint8
 from lineworld.util.slope import get_slope
 
+from multiprocessing import Pool
+
 import flowlines_py
 
 MAX_ITERATIONS = 20_000_000
@@ -37,7 +41,7 @@ class Mapping(StrEnum):
 @dataclass
 class FlowlineHatcherConfig:
     # distance between lines in mm
-    LINE_DISTANCE: tuple[float, float] = (0.3, 5.0)
+    LINE_DISTANCE: tuple[float, float] | list[float] = (0.3, 5.0)
     LINE_DISTANCE_END_FACTOR = 0.5
 
     # distance between points constituting a line in mm
@@ -74,6 +78,32 @@ def _py_config_to_rust_config(
     return rsc
 
 
+def _compute_rust(p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray], config: FlowlineHatcherConfig) -> list[LineString]:
+
+    min_col, min_row, max_col, max_row = bbox
+    dimensions = (max_col - min_col, max_row - min_row)
+
+    rust_config = flowlines_py.FlowlinesConfig()
+    rust_config = _py_config_to_rust_config(config, rust_config)
+
+    rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
+    linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
+
+    linestrings_cropped = []
+    for ls in linestrings:
+        cropped = shapely.intersection(ls, p)
+
+        if type(cropped) is Point:
+            pass
+        elif type(cropped) is MultiLineString:
+            g = geometrytools.unpack_multilinestring(cropped)
+            linestrings_cropped += g
+        else:
+            linestrings_cropped.append(cropped)
+
+    return list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
+
+
 class FlowlineTilerPolyRust:
     def __init__(
         self,
@@ -90,46 +120,35 @@ class FlowlineTilerPolyRust:
     def hatch(self) -> list[LineString]:
         all_linestrings = []
 
-        for i, p in enumerate(self.polygons):
-            logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i / len(self.polygons) * 100.0:5.2f}%")
+        with ProcessPoolExecutor() as executor:
+            futures = []
 
-            min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
-            max_col += 1
-            max_row += 1
+            for i, p in enumerate(self.polygons):
+                logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i / len(self.polygons) * 100.0:5.2f}%")
 
-            if max_row - min_row < 10 or max_col - min_col < 10:
-                logger.warning(f"empty tile {p}")
-                continue
+                min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
+                max_col += 1
+                max_row += 1
 
-            rust_config = flowlines_py.FlowlinesConfig()
-            rust_config = _py_config_to_rust_config(self.config, rust_config)
+                if max_row - min_row < 3 or max_col - min_col < 3:
+                    logger.warning(f"empty tile {p}")
+                    continue
 
-            dimensions = [max_col - min_col, max_row - min_row]
+                tile_mappings = [
+                    self.mappings[Mapping.DISTANCE],
+                    self.mappings[Mapping.ANGLE],
+                    self.mappings[Mapping.MAX_LENGTH],
+                    self.mappings[Mapping.FLAT],
+                ]
+                tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
 
-            tile_mappings = [
-                self.mappings[Mapping.DISTANCE],
-                self.mappings[Mapping.ANGLE],
-                self.mappings[Mapping.MAX_LENGTH],
-                self.mappings[Mapping.NON_FLAT],
-            ]
-            tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
+                bbox = [min_col, min_row, max_col, max_row]
+                futures.append(executor.submit(_compute_rust, p, bbox, tile_mappings, self.config))
 
-            rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
-            linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
+            done, not_done = concurrent.futures.wait(futures, return_when=concurrent.futures.ALL_COMPLETED)
 
-            linestrings_cropped = []
-            for ls in linestrings:
-                cropped = shapely.intersection(ls, p)
-
-                if type(cropped) is Point:
-                    pass
-                elif type(cropped) is MultiLineString:
-                    g = geometrytools.unpack_multilinestring(cropped)
-                    linestrings_cropped += g
-                else:
-                    linestrings_cropped.append(cropped)
-
-            all_linestrings += list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
+            for future in done:
+                all_linestrings += future.result()
 
         return all_linestrings
 
@@ -141,7 +160,9 @@ def _compute(
     xoff: float,
     yoff: float,
 ) -> list[LineString]:
-    hatcher = FlowlineHatcher(p, mapping_tiles, config)
+
+    dimensions = [int(p.bounds[2] - p.bounds[0]), int(p.bounds[3] - p.bounds[1])]
+    hatcher = FlowlineHatcher(dimensions, mapping_tiles, config)
 
     linestrings = hatcher.hatch()
     del hatcher
@@ -234,7 +255,7 @@ class FlowlineTilerPoly:
 class FlowlineTiler:
     def __init__(
         self,
-        mappings: list[Mapping, np.ndarray],
+        mappings: dict[Mapping, np.ndarray],
         config: FlowlineHatcherConfig,
         num_tiles: tuple[int, int],
     ):
@@ -289,7 +310,7 @@ class FlowlineTiler:
                 ]
 
                 hatcher = FlowlineHatcher(
-                    shapely.box(0, 0, self.col_size, self.row_size),
+                    [self.col_size, self.row_size],
                     tile_mappings,
                     self.config,
                     initial_seed_points=initial_seed_points,
@@ -312,46 +333,41 @@ class FlowlineTiler:
 
 
 class FlowlineHatcher:
+    """
+    A Python implementation of the paper "Creating Evenly-Spaced Streamlines
+    of Arbitrary Density" by Bruno Jobard and Wilfrid Lefer.
+
+    """
     def __init__(
         self,
-        polygon: Polygon,
+        dimensions: list[int] | tuple[int, int],
         mappings: list[np.ndarray],
         config: FlowlineHatcherConfig,
         initial_seed_points: list[tuple[float, float]] = [],
         tile_name: str = "",
     ):
-        self.polygon = polygon
+        self.dimensions = dimensions
         self.config = config
 
-        self.bbox = self.polygon.bounds
-        self.bbox = [
-            0,
-            0,
-            math.ceil(self.bbox[2] - self.bbox[0]) + 1,
-            math.ceil(self.bbox[3] - self.bbox[1]) + 1,
-        ]  # minx, miny, maxx, maxy
-
-        self.scale_x = mappings[0].shape[1] / (self.bbox[2] + 0)
-        self.scale_y = mappings[0].shape[0] / (self.bbox[3] + 0)
+        self.scale_x = mappings[0].shape[1] / dimensions[0]
+        self.scale_y = mappings[0].shape[0] / dimensions[1]
 
         self.distance = mappings[0]
         self.angles = (mappings[1].astype(float) / 255.0) * math.tau - math.pi
         self.max_length = mappings[2]
-        self.non_flat = mappings[3]
+        self.flat = mappings[3]
 
         self.initial_seed_points = initial_seed_points
         self.tile_name = tile_name
 
         if self.config.COLLISION_APPROXIMATE:
             self.MAPPING_FACTOR_COLLISION = int(math.ceil(1 / self.config.LINE_DISTANCE[0]))
-            self.point_raster = np.zeros(
-                [self.bbox[3] * self.MAPPING_FACTOR_COLLISION, self.bbox[2] * self.MAPPING_FACTOR_COLLISION], dtype=bool
-            )
+            self.point_raster = np.zeros([self.dimensions[1] * self.MAPPING_FACTOR_COLLISION, self.dimensions[0] * self.MAPPING_FACTOR_COLLISION], dtype=bool)
         else:
             self.point_bins = []
             self.bin_size = self.config.LINE_DISTANCE[1]
-            self.num_bins_x = int(self.bbox[2] // self.bin_size + 1)
-            self.num_bins_y = int(self.bbox[3] // self.bin_size + 1)
+            self.num_bins_x = int(self.dimensions[0] // self.bin_size + 1)
+            self.num_bins_y = int(self.dimensions[1] // self.bin_size + 1)
 
             for x in range(self.num_bins_x):
                 self.point_bins.append([np.empty([0, 2], dtype=float)] * self.num_bins_y)
@@ -370,7 +386,7 @@ class FlowlineHatcher:
     def _map_line_max_length(self, x: float, y: float) -> float:
         return float(
             self.config.LINE_MAX_LENGTH[0]
-            + self.max_length[(y * self.scale_y), int(x * self.scale_x)]
+            + self.max_length[int(y * self.scale_y), int(x * self.scale_x)]
             / 255
             * (self.config.LINE_MAX_LENGTH[1] - self.config.LINE_MAX_LENGTH[0])
         )
@@ -379,10 +395,10 @@ class FlowlineHatcher:
         return self.flat[int(y * self.scale_y), int(x * self.scale_x)] > 0
 
     def _collision_approximate(self, x: float, y: float, factor: float) -> bool:
-        if x >= self.bbox[2]:
+        if x >= self.dimensions[0]:
             return True
 
-        if y >= self.bbox[3]:
+        if y >= self.dimensions[1]:
             return True
 
         min_d = int(self._map_line_distance(x, y) * factor * self.MAPPING_FACTOR_COLLISION)
@@ -446,7 +462,7 @@ class FlowlineHatcher:
         x2 = x1 + self.config.LINE_STEP_DISTANCE * math.cos(a1) * dir
         y2 = y1 + self.config.LINE_STEP_DISTANCE * math.sin(a1) * dir
 
-        if x2 < 0 or x2 >= self.bbox[2] or y2 < 0 or y2 >= self.bbox[3]:
+        if x2 < 0 or x2 >= self.dimensions[0] or y2 < 0 or y2 >= self.dimensions[1]:
             return None
 
         if self._collision(x2, y2, factor=self.config.LINE_DISTANCE_END_FACTOR):
@@ -490,7 +506,7 @@ class FlowlineHatcher:
             x5 = x4 * math.cos(a2) - y4 * math.sin(a2) + x3
             y5 = x4 * math.sin(a2) + y4 * math.cos(a2) + y3
 
-            if x5 < 0 or x5 >= self.bbox[2] or y5 < 0 or y5 >= self.bbox[3]:
+            if x5 < 0 or x5 >= self.dimensions[0] or y5 < 0 or y5 >= self.dimensions[1]:
                 continue
 
             seed_points.append((x5, y5))
@@ -503,11 +519,11 @@ class FlowlineHatcher:
         starting_points_priority = deque(self.initial_seed_points)
 
         # point grid for starting points, grid distance is mean line distance
-        num_gridpoints_x = int((self.bbox[2] - self.bbox[0]) / (self.config.LINE_DISTANCE[0] * 1.5))
-        num_gridpoints_y = int((self.bbox[3] - self.bbox[1]) / (self.config.LINE_DISTANCE[0] * 1.5))
+        num_gridpoints_x = int(self.dimensions[0] / (self.config.LINE_DISTANCE[0] * 1.5))
+        num_gridpoints_y = int(self.dimensions[1] / (self.config.LINE_DISTANCE[0] * 1.5))
 
-        for i in np.linspace(self.bbox[0] + 1, self.bbox[2] - 1, endpoint=False, num=num_gridpoints_x):
-            for j in np.linspace(self.bbox[1] + 1, self.bbox[3] - 1, endpoint=False, num=num_gridpoints_y):
+        for i in np.linspace(1, self.dimensions[0] - 1, endpoint=False, num=num_gridpoints_x):
+            for j in np.linspace(1, self.dimensions[1] - 1, endpoint=False, num=num_gridpoints_y):
                 starting_points.append([i, j])
 
         for i in range(MAX_ITERATIONS):
@@ -638,8 +654,10 @@ if __name__ == "__main__":
     import cProfile
 
     timer_total_runtime = datetime.datetime.now()
+
     pr = cProfile.Profile()
     pr.enable()
+
     mappings = _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE)
     config = FlowlineHatcherConfig()
     config.COLLISION_APPROXIMATE = True
