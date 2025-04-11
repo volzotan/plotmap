@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import shapely
 from loguru import logger
@@ -53,6 +55,25 @@ def _unpack_multigeometry[T](g: Geometry | list[Geometry] | np.ndarray, geometry
 def crop_geometry(main: list[Geometry] | Geometry, tool: list[Geometry]) -> list[Geometry] | Geometry:
     # TODO
     pass
+
+
+def crop_linestrings(linestrings: list[LineString], polygon: Polygon) -> list[LineString]:
+    """
+    Intersect all linestrings with the given polygon. Return only non-empty LineStrings.
+    """
+    linestrings_cropped = []
+    for ls in linestrings:
+        cropped = shapely.intersection(ls, polygon)
+
+        if type(cropped) is shapely.Point:
+            pass
+        elif type(cropped) is MultiLineString:
+            g = unpack_multilinestring(cropped)
+            linestrings_cropped += g
+        else:
+            linestrings_cropped.append(cropped)
+
+    return list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
 
 
 def _linestring_to_coordinate_pairs(

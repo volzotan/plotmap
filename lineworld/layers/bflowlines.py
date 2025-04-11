@@ -31,8 +31,7 @@ from rasterio.warp import (
 
 import lineworld
 from lineworld.core import flowlines
-from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPoly, FlowlineTilerPolyRust, Mapping
-from lineworld.util.gebco_grid_to_polygon import _calculate_topographic_position_index
+from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPoly, Mapping
 from lineworld.util.rastertools import normalize_to_uint8
 from lineworld.util.slope import get_slope
 
@@ -238,8 +237,7 @@ class BathymetryFlowlines(Layer):
                 affine_transform(boundary, mat_map_to_raster) for boundary in self.tile_boundaries
             ]
 
-            # tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries)
-            tiler = FlowlineTilerPolyRust(mappings, flow_config, raster_tile_boundaries)
+            tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries, use_rust=True)
         else:
             tiler = FlowlineTiler(
                 mappings,

@@ -4,7 +4,7 @@ import itertools
 import math
 
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -13,7 +13,6 @@ import cv2
 import numpy as np
 import rasterio
 import shapely
-from dask.distributed import LocalCluster
 from loguru import logger
 from scipy import ndimage
 from shapely import LineString, Polygon, Point, MultiLineString
@@ -21,10 +20,10 @@ from shapely import LineString, Polygon, Point, MultiLineString
 from lineworld.core.svgwriter import SvgWriter
 from lineworld.util import geometrytools
 from lineworld.util.export import convert_svg_to_png
+from lineworld.util.geometrytools import crop_linestrings
 from lineworld.util.rastertools import normalize_to_uint8
 from lineworld.util.slope import get_slope
 
-from multiprocessing import Pool
 
 import flowlines_py
 
@@ -78,8 +77,9 @@ def _py_config_to_rust_config(
     return rsc
 
 
-def _compute_rust(p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray], config: FlowlineHatcherConfig) -> list[LineString]:
-
+def _compute_rust(
+    p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray], config: FlowlineHatcherConfig
+) -> list[LineString]:
     min_col, min_row, max_col, max_row = bbox
     dimensions = (max_col - min_col, max_row - min_row)
 
@@ -89,31 +89,34 @@ def _compute_rust(p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray]
     rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
     linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
 
-    linestrings_cropped = []
-    for ls in linestrings:
-        cropped = shapely.intersection(ls, p)
-
-        if type(cropped) is Point:
-            pass
-        elif type(cropped) is MultiLineString:
-            g = geometrytools.unpack_multilinestring(cropped)
-            linestrings_cropped += g
-        else:
-            linestrings_cropped.append(cropped)
-
-    return list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
+    return crop_linestrings(linestrings, p)
 
 
-class FlowlineTilerPolyRust:
+def _compute_python(
+    p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray], config: FlowlineHatcherConfig
+) -> list[LineString]:
+    min_col, min_row, max_col, max_row = bbox
+    dimensions = (max_col - min_col, max_row - min_row)
+
+    hatcher = FlowlineHatcher(dimensions, tile_mappings, config)
+    linestrings = hatcher.hatch()
+    linestrings = [shapely.affinity.translate(ls, xoff=min_col, yoff=min_row) for ls in linestrings]
+
+    return crop_linestrings(linestrings, p)
+
+
+class FlowlineTilerPoly:
     def __init__(
         self,
         mappings: dict[Mapping, np.ndarray],
         config: FlowlineHatcherConfig,
         polygons: list[Polygon],
+        use_rust: bool = False,
     ):
         self.mappings = mappings
         self.config = config
         self.polygons = polygons
+        self.use_rust = use_rust
 
         self.tiles = [{"linestrings": []} for _ in polygons]
 
@@ -143,7 +146,11 @@ class FlowlineTilerPolyRust:
                 tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
 
                 bbox = [min_col, min_row, max_col, max_row]
-                futures.append(executor.submit(_compute_rust, p, bbox, tile_mappings, self.config))
+
+                if self.use_rust:
+                    futures.append(executor.submit(_compute_rust, p, bbox, tile_mappings, self.config))
+                else:
+                    futures.append(executor.submit(_compute_python, p, bbox, tile_mappings, self.config))
 
             done, not_done = concurrent.futures.wait(futures, return_when=concurrent.futures.ALL_COMPLETED)
 
@@ -151,105 +158,6 @@ class FlowlineTilerPolyRust:
                 all_linestrings += future.result()
 
         return all_linestrings
-
-
-def _compute(
-    p: Polygon,
-    mapping_tiles: list[np.ndarray],
-    config: FlowlineHatcherConfig,
-    xoff: float,
-    yoff: float,
-) -> list[LineString]:
-
-    dimensions = [int(p.bounds[2] - p.bounds[0]), int(p.bounds[3] - p.bounds[1])]
-    hatcher = FlowlineHatcher(dimensions, mapping_tiles, config)
-
-    linestrings = hatcher.hatch()
-    del hatcher
-    linestrings = [shapely.affinity.translate(ls, xoff=xoff, yoff=yoff) for ls in linestrings]
-
-    linestrings_cropped = []
-    for ls in linestrings:
-        cropped = shapely.intersection(ls, p)
-
-        if type(cropped) is Point:
-            pass
-        elif type(cropped) is MultiLineString:
-            g = geometrytools.unpack_multilinestring(cropped)
-            linestrings_cropped += g
-        else:
-            linestrings_cropped.append(cropped)
-
-    linestrings = list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
-
-    return linestrings
-
-
-class FlowlineTilerPoly:
-    def __init__(
-        self,
-        mappings: dict[str, np.ndarray],
-        config: FlowlineHatcherConfig,
-        polygons: list[Polygon],
-    ):
-        self.mappings = mappings
-        self.config = config
-        self.polygons = polygons
-
-        self.tiles = [{"linestrings": []} for _ in polygons]
-
-    def hatch(self) -> list[LineString]:
-        BATCH_SIZE = 4
-        batches = [
-            list(range(len(self.polygons))[i : i + BATCH_SIZE]) for i in range(0, len(self.polygons), BATCH_SIZE)
-        ]
-
-        cluster = LocalCluster(n_workers=BATCH_SIZE, threads_per_worker=1, memory_limit="6GB")
-        client = cluster.get_client()
-        futures = []
-
-        for batch in batches:
-            for i in batch:
-                p = self.polygons[i]
-                logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i / len(self.polygons) * 100.0:5.2f}%")
-
-                min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
-                max_col += 1
-                max_row += 1
-
-                if max_row - min_row < 10 or max_col - min_col < 10:
-                    logger.warning(f"empty tile {p}")
-                    continue
-
-                tile_mappings = [
-                    self.mappings[Mapping.DISTANCE],
-                    self.mappings[Mapping.ANGLE],
-                    self.mappings[Mapping.MAX_LENGTH],
-                    self.mappings[Mapping.FLAT],
-                ]
-                tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
-
-                # self.tiles[i]["linestrings"] = _compute(p, mapping_tiles, self.config, min_col, min_row)
-
-                futures.append(
-                    client.submit(
-                        _compute,
-                        p,
-                        tile_mappings,
-                        self.config,
-                        min_col,
-                        min_row,
-                    )
-                )
-
-            for i, f in enumerate(futures):
-                self.tiles[i]["linestrings"] = f.result()
-
-        linestrings = []
-        for tile in self.tiles:
-            linestrings += tile["linestrings"]
-
-        return linestrings
 
 
 class FlowlineTiler:
@@ -332,12 +240,64 @@ class FlowlineTiler:
         return linestrings
 
 
+class FlowlinesRust:
+    def __init__(
+        self,
+        mappings: dict[Mapping, np.ndarray],
+        config: FlowlineHatcherConfig,
+        polygon: Polygon,
+    ):
+        self.mappings = mappings
+        self.config = config
+        self.polygon = polygon
+
+    def hatch(self) -> list[LineString]:
+        all_linestrings = []
+
+        min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(self.polygon).tolist()]
+        max_col += 1
+        max_row += 1
+
+        tile_mappings = [
+            self.mappings[Mapping.DISTANCE],
+            self.mappings[Mapping.ANGLE],
+            self.mappings[Mapping.MAX_LENGTH],
+            self.mappings[Mapping.FLAT],
+        ]
+        tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
+
+        dimensions = (max_col - min_col, max_row - min_row)
+
+        rust_config = flowlines_py.FlowlinesConfig()
+        rust_config = _py_config_to_rust_config(self.config, rust_config)
+
+        rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
+        linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
+
+        linestrings_cropped = []
+        for ls in linestrings:
+            cropped = shapely.intersection(ls, self.polygon)
+
+            if type(cropped) is Point:
+                pass
+            elif type(cropped) is MultiLineString:
+                g = geometrytools.unpack_multilinestring(cropped)
+                linestrings_cropped += g
+            else:
+                linestrings_cropped.append(cropped)
+
+        all_linestrings += list(itertools.filterfalse(shapely.is_empty, linestrings_cropped))
+
+        return all_linestrings
+
+
 class FlowlineHatcher:
     """
     A Python implementation of the paper "Creating Evenly-Spaced Streamlines
     of Arbitrary Density" by Bruno Jobard and Wilfrid Lefer.
 
     """
+
     def __init__(
         self,
         dimensions: list[int] | tuple[int, int],
@@ -362,7 +322,13 @@ class FlowlineHatcher:
 
         if self.config.COLLISION_APPROXIMATE:
             self.MAPPING_FACTOR_COLLISION = int(math.ceil(1 / self.config.LINE_DISTANCE[0]))
-            self.point_raster = np.zeros([self.dimensions[1] * self.MAPPING_FACTOR_COLLISION, self.dimensions[0] * self.MAPPING_FACTOR_COLLISION], dtype=bool)
+            self.point_raster = np.zeros(
+                [
+                    self.dimensions[1] * self.MAPPING_FACTOR_COLLISION,
+                    self.dimensions[0] * self.MAPPING_FACTOR_COLLISION,
+                ],
+                dtype=bool,
+            )
         else:
             self.point_bins = []
             self.bin_size = self.config.LINE_DISTANCE[1]
@@ -665,28 +631,12 @@ if __name__ == "__main__":
     config.LINE_MAX_LENGTH = (50, 200)
 
     # tiler = FlowlineTiler(mappings, config, (2, 2))
-    # tiler = FlowlineTilerPoly(
-    #     mappings,
-    #     config,
-    #     [Point([RESIZE_SIZE[0] // 2, RESIZE_SIZE[0] // 2]).buffer(min(RESIZE_SIZE) * 0.49)],
-    # )
-    # linestrings = tiler.hatch()
-
-
-
-    mapping_list = [
-        mappings[Mapping.DISTANCE],
-        mappings[Mapping.ANGLE],
-        mappings[Mapping.MAX_LENGTH],
-        mappings[Mapping.FLAT],
-    ]
-
-    hatcher = FlowlineHatcher(RESIZE_SIZE, mapping_list, config)
-    linestrings = hatcher.hatch()
-
-    print(len(linestrings))
-
-
+    tiler = FlowlineTilerPoly(
+        mappings,
+        config,
+        [Point([RESIZE_SIZE[0] // 2, RESIZE_SIZE[0] // 2]).buffer(min(RESIZE_SIZE) * 0.49)],
+    )
+    linestrings = tiler.hatch()
 
     pr.disable()
     pr.dump_stats("profile.pstat")
@@ -703,193 +653,3 @@ if __name__ == "__main__":
         convert_svg_to_png(svg, svg.dimensions[0] * 10)
     except Exception as e:
         logger.warning(f"SVG to PNG conversion failed: {e}")
-
-    # # --------
-    #
-    # # RESIZE_SIZE = [20_000, 20_000]
-    # CROP_SIZE = [10000, 10000]
-    #
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("--resize", type=int)
-    # parser.add_argument("--BLUR_ANGLES_KERNEL_SIZE", type=int)
-    # args = vars(parser.parse_args())
-    #
-    # config = FlowlineHatcherConfig()
-    #
-    # config.BLUR_ANGLES_KERNEL_SIZE = 50
-    # config.BLUR_DENSITY_KERNEL_SIZE = 50
-    # config.BLUR_INCLINATION_KERNEL_SIZE = 20
-    #
-    # config.LINE_MAX_LENGTH = 30  # 6
-    # config.LINE_DISTANCE = (0.3, 3.0)
-    #
-    # if args["BLUR_ANGLES_KERNEL_SIZE"] is not None:
-    #     config.BLUR_ANGLES_KERNEL_SIZE = args["BLUR_ANGLES_KERNEL_SIZE"]
-    #
-    # # # since we are working in the test environment directly on the raster image coordinate space
-    # # # and not with map coordinates that will be exported in a SVG, we need to scale the millimeter-values to raster-space
-    # # config.PX_PER_MM = 5
-    # # config.LINE_DISTANCE = [e * config.PX_PER_MM for e in config.LINE_DISTANCE]
-    # # config.LINE_STEP_DISTANCE += config.PX_PER_MM
-    #
-    # data = None
-    # with rasterio.open(str(ELEVATION_FILE)) as dataset:
-    #     if args["resize"] is not None:
-    #         data = dataset.read(
-    #             out_shape=(args["resize"], args["resize"]),
-    #             resampling=rasterio.enums.Resampling.bilinear,
-    #         )[0]
-    #     else:
-    #         data = dataset.read(1)
-    #
-    # # data = cv2.resize(data, RESIZE_SIZE)
-    #
-    # CROP_X, CROP_Y = [data.shape[0] // 2, data.shape[1] // 2]
-    # data = data[
-    #     CROP_Y - CROP_SIZE[1] // 2 : CROP_Y + CROP_SIZE[1] // 2,
-    #     CROP_X - CROP_SIZE[0] // 2 : CROP_X + CROP_SIZE[0] // 2,
-    # ]
-    #
-    # logger.debug(f"data {ELEVATION_FILE} min: {np.min(data)} | max: {np.max(data)} | shape: {data.shape}")
-    #
-    # # kernel5 = np.ones((5, 5), np.uint8)
-    # # two_tone_data = cv2.imread(TWO_TONE_FILE, cv2.IMREAD_ANYCOLOR)
-    # # two_tone_data = cv2.cvtColor(two_tone_data, cv2.COLOR_BGR2HSV)
-    # # # BLUR_HIGHLIGHT_KERNEL_SIZE = 5
-    # # # two_tone_data = cv2.blur(two_tone_data, (BLUR_HIGHLIGHT_KERNEL_SIZE, BLUR_HIGHLIGHT_KERNEL_SIZE))
-    # # two_tone_highlights = cv2.inRange(two_tone_data, np.array([60 - 50, 10, 10]), np.array([60 + 50, 255, 255]))
-    # # # two_tone_highlights = cv2.morphologyEx(two_tone_highlights, cv2.MORPH_OPEN, kernel5)
-    # # # two_tone_highlights = cv2.morphologyEx(two_tone_highlights, cv2.MORPH_CLOSE, kernel5)
-    # # two_tone_highlights = cv2.resize(two_tone_highlights, RESIZE_SIZE, cv2.INTER_NEAREST)
-    # #
-    # # two_tone_highlights = two_tone_highlights[
-    # #     CROP_Y - CROP_SIZE[1] // 2 : CROP_Y + CROP_SIZE[1] // 2,
-    # #     CROP_X - CROP_SIZE[0] // 2 : CROP_X + CROP_SIZE[0] // 2,
-    # # ]
-    # #
-    # # cv2.imwrite(Path(OUTPUT_PATH, "two_tone_split.png"), two_tone_highlights)
-    #
-    # for i in range(1, 30):
-    #     _, _, _, _, angles, inclination = get_slope(data, i)
-    #
-    #     angle_width = 30
-    #     tanako_ang = cv2.inRange(np.degrees(angles), np.array([45 - angle_width / 2]), np.array([45 + angle_width / 2]))
-    #     # tanako_inc = cv2.inRange(inclination, np.array([500]), np.array([np.max(inclination)]))
-    #     tanako_inc = cv2.inRange(inclination, np.array([20]), np.array([2000]))
-    #
-    #     tanako = (np.logical_and(tanako_ang, tanako_inc) * 255).astype(np.uint8)
-    #
-    #     kernel = np.ones((3, 3), np.uint8)
-    #     tanako = cv2.morphologyEx(tanako, cv2.MORPH_OPEN, kernel)
-    #     tanako = cv2.morphologyEx(tanako, cv2.MORPH_CLOSE, kernel)
-    #
-    #     cv2.imwrite(Path(OUTPUT_PATH, f"tanako_base_stride_{i}.png"), tanako)
-    # exit()
-    #
-    # two_tone_highlights = tanako
-    #
-    # # density_data = None
-    # #
-    # # if DENSITY_FILE == ELEVATION_FILE:
-    # #     density_data = np.copy(data)
-    # # else:
-    # #     if DENSITY_FILE.suffix.endswith(".tif"):
-    # #         density_data = cv2.imread(str(ELEVATION_FILE), cv2.IMREAD_UNCHANGED)
-    # #     else:
-    # #         density_data = cv2.imread(str(DENSITY_FILE), cv2.IMREAD_GRAYSCALE)
-    # #
-    # # if density_data.shape != data.shape:
-    # #     density_data = cv2.resize(density_data, data.shape)
-    # #
-    # # density_normalized = (density_data - np.min(density_data)) / (np.max(density_data) - np.min(density_data))
-    # #
-    # # # Apply a non-linear scale
-    # # scale = scales.Scale(scales.quadratic_bezier, {"p1": [0.30, 0], "p2": [.70, 1.0]})
-    # # density_normalized = scale.apply(density_normalized)
-    # #
-    # # density = (np.full(density_data.shape, config.LINE_DISTANCE[0], dtype=float) +
-    # #            (density_normalized * (config.LINE_DISTANCE[1] - config.LINE_DISTANCE[0])))
-    #
-    # timer = datetime.datetime.now()
-    #
-    # # pr = profile.Profile()
-    # # pr.enable()
-    #
-    # tiler = FlowlineTiler(data, None, config, [2, 2])
-    #
-    # # tiler = FlowlineTilerPoly(
-    # #     data,
-    # #     None,
-    # #     config,
-    # #     [
-    # #         Point([data.shape[1]*0.25, data.shape[0]//2]).buffer(np.min(data.shape)//4-100),
-    # #         Point([data.shape[1]*0.75, data.shape[0]//2]).buffer(np.min(data.shape)//4-100)
-    # #     ]
-    # # )
-    #
-    # linestrings = tiler.hatch()
-    #
-    # # split linestrings
-    # linestrings_splitted = []
-    # for l in linestrings:
-    #     coords = l.coords
-    #     for i in range(len(coords) - 1):
-    #         linestrings_splitted.append(LineString([coords[i], coords[i + 1]]))
-    #
-    # linestrings_lowlights = []
-    # linestrings_highlights = []
-    # for l in linestrings_splitted:
-    #     match = False
-    #     for p in l.coords:
-    #         x = int(p[0])
-    #         y = int(p[1])
-    #         if two_tone_highlights[y, x] > 0:
-    #             match = True
-    #             break
-    #     if match:
-    #         linestrings_highlights.append(l)
-    #     else:
-    #         linestrings_lowlights.append(l)
-    #
-    # print(f"high: {len(linestrings_highlights)} / low: {len(linestrings_lowlights)}")
-    #
-    # # pr.disable()
-    # # pr.dump_stats("profile.pstat")
-    #
-    # total_time = (datetime.datetime.now() - timer).total_seconds()
-    # avg_line_length = sum([x.length for x in linestrings]) / len(linestrings)
-    #
-    # logger.info(f"total time:         {total_time:5.2f}s")
-    # logger.info(f"avg line length:    {avg_line_length:5.2f}")
-    #
-    # timer = datetime.datetime.now()
-    # tiler._debug_viz(linestrings)
-    # total_time = (datetime.datetime.now() - timer).total_seconds()
-    # logger.info(f"total time viz:     {total_time:5.2f}s")
-    #
-    # svg = SvgWriter(Path(OUTPUT_PATH, "flowlines.svg"), data.shape)
-    #
-    # options = {"fill": "none", "stroke": "black", "stroke-width": "2"}
-    #
-    # # svg.add("flowlines", linestrings, options=options)
-    #
-    # # land_polys = _extract_polygons(data, *get_elevation_bounds([0, 10_000], 1)[0], True)
-    # # options_land = {
-    # #     "fill": "green",
-    # #     "stroke": "none",
-    # #     "fill-opacity": "0.5"
-    # # }
-    # # svg.add("land", land_polys, options=options_land)
-    #
-    # options_high = {
-    #     "fill": "none",
-    #     "stroke": "aqua",
-    #     # "opacity": "0.5",
-    #     "stroke-width": "2",
-    # }
-    # options_low = {"fill": "none", "stroke": "blue", "stroke-width": "2"}
-    #
-    # svg.add("flowlines_high", linestrings_highlights, options=options_high)
-    # svg.add("flowlines_low", linestrings_lowlights, options=options_low)
-    #
-    # svg.write()
