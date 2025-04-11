@@ -31,7 +31,7 @@ class Mapping(StrEnum):
     DISTANCE = (auto(),)
     ANGLE = (auto(),)
     MAX_LENGTH = (auto(),)
-    NON_FLAT = auto()
+    FLAT = (auto(),)
 
 
 @dataclass
@@ -204,7 +204,7 @@ class FlowlineTilerPoly:
                     self.mappings[Mapping.DISTANCE],
                     self.mappings[Mapping.ANGLE],
                     self.mappings[Mapping.MAX_LENGTH],
-                    self.mappings[Mapping.NON_FLAT],
+                    self.mappings[Mapping.FLAT],
                 ]
                 tile_mappings = [mapping[min_row:max_row, min_col:max_col] for mapping in tile_mappings]
 
@@ -282,7 +282,7 @@ class FlowlineTiler:
                     self.mappings[Mapping.DISTANCE],
                     self.mappings[Mapping.ANGLE],
                     self.mappings[Mapping.MAX_LENGTH],
-                    self.mappings[Mapping.NON_FLAT],
+                    self.mappings[Mapping.FLAT],
                 ]
                 tile_mappings = [
                     mapping[t["min_row"] : t["max_row"], t["min_col"] : t["max_col"]] for mapping in tile_mappings
@@ -375,8 +375,8 @@ class FlowlineHatcher:
             * (self.config.LINE_MAX_LENGTH[1] - self.config.LINE_MAX_LENGTH[0])
         )
 
-    def _map_non_flat(self, x: float, y: float) -> bool:
-        return self.non_flat[int(y * self.scale_y), int(x * self.scale_x)] == 0
+    def _map_flat(self, x: float, y: float) -> bool:
+        return self.flat[int(y * self.scale_y), int(x * self.scale_x)] > 0
 
     def _collision_approximate(self, x: float, y: float, factor: float) -> bool:
         if x >= self.bbox[2]:
@@ -436,7 +436,7 @@ class FlowlineHatcher:
     def _next_point(self, x1: float, y1: float, forwards: bool) -> tuple[float, float] | None:
         a1 = self._map_angle(x1, y1)
 
-        if not self._map_non_flat(x1, y1) > 1:
+        if self._map_flat(x1, y1):
             return None
 
         dir = 1
@@ -607,8 +607,8 @@ def _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE) -> dict[Mapping, np.ndarray]:
 
     # uint8 image must be centered around 128 to deal with negative values
     mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
-    mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
-    mapping_non_flat[inclination > config.MIN_INCLINATION] = 255  # uint8
+    mapping_flat = np.zeros_like(inclination, dtype=np.uint8)
+    mapping_flat[inclination < config.MIN_INCLINATION] = 255  # uint8
     mapping_distance = normalize_to_uint8(elevation)  # uint8
     mapping_max_length = win_var  # uint8
 
@@ -617,7 +617,7 @@ def _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE) -> dict[Mapping, np.ndarray]:
     mapping_max_length = cv2.blur(mapping_max_length, (10, 10))
 
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_angle.png")), normalize_to_uint8(mapping_angle / math.tau))
-    cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_non_flat.png")), mapping_non_flat.astype(np.uint8) * 255)
+    cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_flat.png")), mapping_flat.astype(np.uint8) * 255)
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_distance.png")), mapping_distance)
     cv2.imwrite(str(Path(OUTPUT_PATH, "mapping_max_segments.png")), mapping_max_length)
 
@@ -625,7 +625,7 @@ def _prepare_mappings(OUTPUT_PATH, RESIZE_SIZE) -> dict[Mapping, np.ndarray]:
         Mapping.DISTANCE: mapping_distance,
         Mapping.ANGLE: mapping_angle,
         Mapping.MAX_LENGTH: mapping_max_length,
-        Mapping.NON_FLAT: mapping_non_flat,
+        Mapping.FLAT: mapping_flat,
     }
 
     return mappings
@@ -647,13 +647,29 @@ if __name__ == "__main__":
     config.LINE_MAX_LENGTH = (50, 200)
 
     # tiler = FlowlineTiler(mappings, config, (2, 2))
-    tiler = FlowlineTilerPoly(
-        mappings,
-        config,
-        [Point([RESIZE_SIZE[0] // 2, RESIZE_SIZE[0] // 2]).buffer(min(RESIZE_SIZE) * 0.49)],
-    )
+    # tiler = FlowlineTilerPoly(
+    #     mappings,
+    #     config,
+    #     [Point([RESIZE_SIZE[0] // 2, RESIZE_SIZE[0] // 2]).buffer(min(RESIZE_SIZE) * 0.49)],
+    # )
+    # linestrings = tiler.hatch()
 
-    linestrings = tiler.hatch()
+
+
+    mapping_list = [
+        mappings[Mapping.DISTANCE],
+        mappings[Mapping.ANGLE],
+        mappings[Mapping.MAX_LENGTH],
+        mappings[Mapping.FLAT],
+    ]
+
+    hatcher = FlowlineHatcher(RESIZE_SIZE, mapping_list, config)
+    linestrings = hatcher.hatch()
+
+    print(len(linestrings))
+
+
+
     pr.disable()
     pr.dump_stats("profile.pstat")
     logger.info(f"total time: {(datetime.datetime.now() - timer_total_runtime).total_seconds():5.2f}s")

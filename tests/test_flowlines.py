@@ -48,8 +48,8 @@ def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatch
     # uint8 image must be centered around 128 to deal with negative values
     mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
 
-    mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
-    mapping_non_flat[inclination > flow_config.MIN_INCLINATION] = 255  # uint8
+    mapping_flat = np.zeros_like(inclination, dtype=np.uint8)
+    mapping_flat[inclination < flow_config.MIN_INCLINATION] = 255  # uint8
 
     mapping_distance = normalize_to_uint8(elevation)  # uint8
 
@@ -60,7 +60,7 @@ def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatch
     mapping_max_length = cv2.blur(mapping_max_length, (10, 10))
 
     cv2.imwrite(str(Path(output_path, "mapping_angle.png")), normalize_to_uint8(mapping_angle / math.tau))
-    cv2.imwrite(str(Path(output_path, "mapping_non_flat.png")), mapping_non_flat)
+    cv2.imwrite(str(Path(output_path, "mapping_flat.png")), mapping_flat)
     cv2.imwrite(str(Path(output_path, "mapping_distance.png")), mapping_distance)
     cv2.imwrite(str(Path(output_path, "mapping_max_segments.png")), mapping_max_length)
 
@@ -68,7 +68,7 @@ def mapping(elevation: np.ndarray, output_path: Path, flow_config: FlowlineHatch
         Mapping.DISTANCE: mapping_distance,
         Mapping.ANGLE: mapping_angle,
         Mapping.MAX_LENGTH: mapping_max_length,
-        Mapping.NON_FLAT: mapping_non_flat,
+        Mapping.FLAT: mapping_flat,
     }
 
 

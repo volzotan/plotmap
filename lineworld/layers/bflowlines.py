@@ -202,8 +202,8 @@ class BathymetryFlowlines(Layer):
         # uint8 image must be centered around 128 to deal with negative values
         mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
 
-        mapping_non_flat = np.zeros_like(inclination, dtype=np.uint8)
-        mapping_non_flat[inclination > flow_config.MIN_INCLINATION] = 255  # uint8
+        mapping_flat = np.zeros_like(inclination, dtype=np.uint8)
+        mapping_flat[inclination < flow_config.MIN_INCLINATION] = 255  # uint8
 
         mapping_distance = density  # uint8
 
@@ -225,7 +225,7 @@ class BathymetryFlowlines(Layer):
             Mapping.DISTANCE: mapping_distance,
             Mapping.ANGLE: mapping_angle,
             Mapping.MAX_LENGTH: mapping_line_max_length,
-            Mapping.NON_FLAT: mapping_non_flat,
+            Mapping.FLAT: mapping_flat,
         }
 
         tiler = None
