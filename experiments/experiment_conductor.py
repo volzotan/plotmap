@@ -2,6 +2,8 @@ import datetime
 import os
 import re
 import subprocess
+import tomllib
+
 import toml
 from pathlib import Path
 
@@ -15,9 +17,8 @@ import lineworld
 # VARIABLE = ["layer", "BathymetryFlowlines", "blur_density_kernel_size"]
 # VARIABLE = ["layer", "BathymetryFlowlines", "line_distance"]
 # VARIABLE = ["layer", "BathymetryFlowlines", "scale_adjustment_value"]
-# VARIABLE = ["layer", "BathymetryFlowlines", "line_distance_end_factor"]
-VARIABLE = ["layer", "BathymetryFlowlines", "line_max_segments"]
-
+VARIABLE = ["layer", "BathymetryFlowlines", "line_distance_end_factor"]
+# VARIABLE = ["layer", "BathymetryFlowlines", "line_max_segments"]
 
 # VARIABLE_STATES = [1, 3, 5, 9, 13, 17, 21, 31, 41, 51, 61, 81, 101]
 # VARIABLE_STATES = [
@@ -29,12 +30,13 @@ VARIABLE = ["layer", "BathymetryFlowlines", "line_max_segments"]
 #     # [0.5, 10.0]
 #     # [3, 6],
 # ]
-# VARIABLE_STATES = [0.2, 0.4, 0.6, 0.8, 1.0]
-VARIABLE_STATES = [5, 10, 20, 30, 40, 50]
+VARIABLE_STATES = [0.2, 0.4, 0.6, 0.8, 1.0]
+# VARIABLE_STATES = [5, 10, 20, 30, 40, 50]
 
 SCRIPT_PATH = "lineworld/run.py"
 WORKING_DIR = "."
-TEMP_DIR = "tmp"
+TEMP_DIR = "temp"
+BASE_CONFIG_FILE = Path("configs", "config_750x500.toml")
 TMP_CONFIG_FILE = Path(TEMP_DIR, "config_overwrite.toml")
 SCRIPT_OUTPUT_IMAGE_PATH = "LineWorldBasicConfig.svg"
 OUTPUT_DIR = "experiments/conductor"
@@ -66,17 +68,21 @@ for variable_state in VARIABLE_STATES:
 
     # create the temporary config overwrite file
     config = {}
+    with open(BASE_CONFIG_FILE, "rb") as f:
+        config = tomllib.load(f)
+
     if isinstance(VARIABLE, list):
         tmp_config = config
         for i in range(len(VARIABLE)):
             if i == len(VARIABLE) - 1:
                 tmp_config[VARIABLE[i]] = variable_state
             else:
-                tmp_config[VARIABLE[i]] = {}
+                if VARIABLE[i] not in tmp_config:
+                    tmp_config[VARIABLE[i]] = {}
                 tmp_config = tmp_config[VARIABLE[i]]
-
     else:
         config[VARIABLE] = variable_state
+
     with open(TMP_CONFIG_FILE, "w") as f:
         toml.dump(config, f)
 
@@ -94,11 +100,11 @@ for variable_state in VARIABLE_STATES:
     total_runtime += runtime
 
     # if SVG, convert to image
-    experiment_output_image_path = SCRIPT_OUTPUT_IMAGE_PATH
-    if SCRIPT_OUTPUT_IMAGE_PATH.lower().endswith(".svg"):
+    experiment_output_image_path = config["name"] + ".svg"
+    if experiment_output_image_path.lower().endswith(".svg"):
         converted_image_output_path = Path(
-            Path(SCRIPT_OUTPUT_IMAGE_PATH).parent,
-            Path(SCRIPT_OUTPUT_IMAGE_PATH).stem + INKSCAPE_CONVERSION_SUFFIX,
+            Path(experiment_output_image_path).parent,
+            Path(experiment_output_image_path).stem + INKSCAPE_CONVERSION_SUFFIX,
         )
         result = subprocess.run(
             [
@@ -112,7 +118,7 @@ for variable_state in VARIABLE_STATES:
             capture_output=False,
         )
 
-        os.remove(experiment_output_image_path)
+        # os.remove(experiment_output_image_path)
         experiment_output_image_path = converted_image_output_path
 
     # insert info text into output image
