@@ -38,7 +38,6 @@ WORKING_DIR = "."
 TEMP_DIR = "temp"
 BASE_CONFIG_FILE = Path("configs", "config_750x500.toml")
 TMP_CONFIG_FILE = Path(TEMP_DIR, "config_overwrite.toml")
-SCRIPT_OUTPUT_IMAGE_PATH = "LineWorldBasicConfig.svg"
 OUTPUT_DIR = "experiments/conductor"
 
 FFMPEG_TEMP_FILE = Path(OUTPUT_DIR, "ffmpeg_mux_file.txt")
@@ -109,7 +108,7 @@ for variable_state in VARIABLE_STATES:
         result = subprocess.run(
             [
                 "/Applications/Inkscape.app/Contents/MacOS/inkscape",
-                SCRIPT_OUTPUT_IMAGE_PATH,
+                experiment_output_image_path,
                 f"--export-filename={converted_image_output_path}",
                 f"--export-width={INKSCAPE_CONVERSION_WIDTH}",
             ],
