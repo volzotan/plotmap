@@ -31,7 +31,7 @@ import netCDF4
 
 import lineworld
 from lineworld.core import flowlines
-from lineworld.core.flowlines import FlowlineTiler, FlowlineTilerPolyRust, Mapping, _py_config_to_rust_config
+from lineworld.core.flowlines import Mapping, FlowlineTilerPoly
 from lineworld.util.rastertools import normalize_to_uint8
 
 
@@ -151,6 +151,14 @@ class OceanCurrents(Layer):
             u = dataset.read(1)
             v = dataset.read(2)
 
+            # increase size for smoothing
+            # OSCAR current data has a rather low resolution of 0.25° and
+            # the flowlines algorithm does no smoothing, just raster pixel selection
+            # by applying int(coordinate * scaling_factor)
+            resized_shape = [u.shape[1] * 2, u.shape[0] * 2]
+            u = cv2.resize(u, resized_shape)
+            v = cv2.resize(v, resized_shape)
+
             angles = np.arctan2(u, v)
             magnitude = np.hypot(u, v)
 
@@ -159,19 +167,20 @@ class OceanCurrents(Layer):
             mapping_angle = angles + math.pi
             mapping_angle = ((mapping_angle / math.tau) * 255).astype(np.uint8)
 
-            mapping_non_flat = np.zeros_like(magnitude, dtype=np.uint8)
-            mapping_non_flat[magnitude > flow_config.MIN_INCLINATION] = 255  # uint8
+            mapping_flat = np.zeros_like(magnitude, dtype=np.uint8)
+            mapping_flat[magnitude < flow_config.MIN_INCLINATION] = 255  # uint8
 
             magnitude = np.clip(magnitude, 0, 1)
             mapping_distance = ~normalize_to_uint8(magnitude)  # uint8
 
-            mapping_line_max_length = np.full_like(mapping_angle, 255)
+            # mapping_line_max_length = np.full_like(mapping_angle, 255)
+            mapping_line_max_length = np.copy(mapping_distance)
 
             mappings = {
                 Mapping.DISTANCE: mapping_distance,
                 Mapping.ANGLE: mapping_angle,
                 Mapping.MAX_LENGTH: mapping_line_max_length,
-                Mapping.NON_FLAT: mapping_non_flat,
+                Mapping.FLAT: mapping_flat,
             }
 
             mat_map_to_raster = document_info.get_transformation_matrix_map_to_raster(u.shape[1], u.shape[0])
@@ -179,20 +188,25 @@ class OceanCurrents(Layer):
                 affine_transform(boundary, mat_map_to_raster) for boundary in self.tile_boundaries
             ]
 
-            # tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries)
-            tiler = FlowlineTilerPolyRust(mappings, flow_config, raster_tile_boundaries)
+            tiler = FlowlineTilerPoly(
+                mappings,
+                flow_config,
+                self.tile_boundaries, # map space
+                raster_tile_boundaries, # raster space
+                use_rust=True
+            )
             linestrings = tiler.hatch()
 
             # no tiling, compute all at once
             # rust_config = flowlines_py.FlowlinesConfig()
             # rust_config = _py_config_to_rust_config(flow_config, rust_config)
-            # mappings = [mapping_distance, mapping_angle, mapping_line_max_length, mapping_non_flat]
+            # mappings = [mapping_distance, mapping_angle, mapping_line_max_length, mapping_flat]
             # rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch([u.shape[1], u.shape[0]], rust_config, *mappings)
             # linestrings = [LineString(l) for l in rust_lines]
 
             # convert from raster pixel coordinates to map coordinates
-            mat_raster_to_map = document_info.get_transformation_matrix_raster_to_map(u.shape[1], u.shape[0])
-            linestrings = [affine_transform(line, mat_raster_to_map) for line in linestrings]
+            # mat_raster_to_map = document_info.get_transformation_matrix_raster_to_map(u.shape[1], u.shape[0])
+            # linestrings = [affine_transform(line, mat_raster_to_map) for line in linestrings]
             linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
             # TODO: this should be a function in geometrytools

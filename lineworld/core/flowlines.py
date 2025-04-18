@@ -81,13 +81,15 @@ def _compute_rust(
     p: Polygon, bbox: list[float], tile_mappings: list[np.ndarray], config: FlowlineHatcherConfig
 ) -> list[LineString]:
     min_col, min_row, max_col, max_row = bbox
-    dimensions = (max_col - min_col, max_row - min_row)
+
+    minx, miny, maxx, maxy = p.bounds
+    dimensions = (int(maxx - minx), int(maxy - miny))
 
     rust_config = flowlines_py.FlowlinesConfig()
     rust_config = _py_config_to_rust_config(config, rust_config)
 
     rust_lines: list[list[tuple[float, float]]] = flowlines_py.hatch(dimensions, rust_config, *tile_mappings)
-    linestrings = [shapely.affinity.translate(LineString(l), xoff=min_col, yoff=min_row) for l in rust_lines]
+    linestrings = [shapely.affinity.translate(LineString(l), xoff=minx, yoff=miny) for l in rust_lines]
 
     return crop_linestrings(linestrings, p)
 
@@ -110,15 +112,17 @@ class FlowlineTilerPoly:
         self,
         mappings: dict[Mapping, np.ndarray],
         config: FlowlineHatcherConfig,
-        polygons: list[Polygon],
+        polygons_map: list[Polygon],
+        polygons_raster: list[Polygon],
         use_rust: bool = False,
     ):
         self.mappings = mappings
         self.config = config
-        self.polygons = polygons
+        self.polygons_map = polygons_map
+        self.polygons_raster = polygons_raster
         self.use_rust = use_rust
 
-        self.tiles = [{"linestrings": []} for _ in polygons]
+        self.tiles = [{"linestrings": []} for _ in polygons_map]
 
     def hatch(self) -> list[LineString]:
         all_linestrings = []
@@ -126,15 +130,17 @@ class FlowlineTilerPoly:
         with ProcessPoolExecutor() as executor:
             futures = []
 
-            for i, p in enumerate(self.polygons):
-                logger.debug(f"processing tile {i:03}/{len(self.polygons):03} : {i / len(self.polygons) * 100.0:5.2f}%")
+            for i in range(len(self.polygons_map)):
+                p_m = self.polygons_map[i]
+                p_r = self.polygons_raster[i]
+                logger.debug(f"processing tile {i:03}/{len(self.polygons_map):03} : {i / len(self.polygons_map) * 100.0:5.2f}%")
 
-                min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p).tolist()]
+                min_col, min_row, max_col, max_row = [int(e) for e in shapely.bounds(p_r).tolist()]
                 max_col += 1
                 max_row += 1
 
                 if max_row - min_row < 3 or max_col - min_col < 3:
-                    logger.warning(f"empty tile {p}")
+                    logger.warning(f"empty tile {p_m}")
                     continue
 
                 tile_mappings = [
@@ -148,9 +154,9 @@ class FlowlineTilerPoly:
                 bbox = [min_col, min_row, max_col, max_row]
 
                 if self.use_rust:
-                    futures.append(executor.submit(_compute_rust, p, bbox, tile_mappings, self.config))
+                    futures.append(executor.submit(_compute_rust, p_m, bbox, tile_mappings, self.config))
                 else:
-                    futures.append(executor.submit(_compute_python, p, bbox, tile_mappings, self.config))
+                    futures.append(executor.submit(_compute_python, p_m, bbox, tile_mappings, self.config))
 
             done, not_done = concurrent.futures.wait(futures, return_when=concurrent.futures.ALL_COMPLETED)
 

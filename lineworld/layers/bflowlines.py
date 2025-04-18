@@ -72,9 +72,9 @@ class BathymetryFlowlines(Layer):
         self.elevation_file = Path(
             self.data_dir, "flowlines_elevation.tif"
         )  # TODO: hardcoded reference to image file rendered by blender
-        self.highlights_file = Path(
-            self.data_dir, "flowlines_highlights.png"
-        )  # TODO: hardcoded reference to image file rendered by blender
+        # self.highlights_file = Path(
+        #     self.data_dir, "flowlines_highlights.png"
+        # )  # TODO: hardcoded reference to image file rendered by blender
         self.density_file = Path("blender", "output.png")
 
         if not self.data_dir.exists():
@@ -177,7 +177,8 @@ class BathymetryFlowlines(Layer):
 
             # 50:50 blend of elevation data and externally computed density image
             elevation_normalized = normalize_to_uint8(elevation)
-            density = np.mean(np.dstack([density, elevation_normalized]), axis=2).astype(np.uint8)
+            # density = np.mean(np.dstack([density, elevation_normalized]), axis=2).astype(np.uint8)
+
 
         except Exception as e:
             logger.error(e)
@@ -208,13 +209,13 @@ class BathymetryFlowlines(Layer):
 
         mapping_line_max_length = win_var  # uint8
 
-        if self.config.get("blur_angles", False):
-            kernel_size = self.config.get("blur_angles_kernel_size", 10)
-            mapping_angle = cv2.blur(mapping_angle, (kernel_size, kernel_size))
-
         if self.config.get("blur_distance", False):
             kernel_size = self.config.get("blur_distance_kernel_size", 10)
             mapping_distance = cv2.blur(mapping_distance, (kernel_size, kernel_size))
+
+        if self.config.get("blur_angles", False):
+            kernel_size = self.config.get("blur_angles_kernel_size", 10)
+            mapping_angle = cv2.blur(mapping_angle, (kernel_size, kernel_size))
 
         if self.config.get("blur_length", False):
             kernel_size = self.config.get("blur_length_kernel_size", 10)
@@ -237,7 +238,13 @@ class BathymetryFlowlines(Layer):
                 affine_transform(boundary, mat_map_to_raster) for boundary in self.tile_boundaries
             ]
 
-            tiler = FlowlineTilerPoly(mappings, flow_config, raster_tile_boundaries, use_rust=True)
+            tiler = FlowlineTilerPoly(
+                mappings,
+                flow_config,
+                self.tile_boundaries, # map space
+                raster_tile_boundaries, # raster space
+                use_rust=True
+            )
         else:
             tiler = FlowlineTiler(
                 mappings,
@@ -248,10 +255,10 @@ class BathymetryFlowlines(Layer):
         linestrings = tiler.hatch()
 
         # convert from raster pixel coordinates to map coordinates
-        mat_raster_to_map = document_info.get_transformation_matrix_raster_to_map(
-            elevation.shape[1], elevation.shape[0]
-        )
-        linestrings = [affine_transform(line, mat_raster_to_map) for line in linestrings]
+        # mat_raster_to_map = document_info.get_transformation_matrix_raster_to_map(
+        #     elevation.shape[1], elevation.shape[0]
+        # )
+        # linestrings = [affine_transform(line, mat_raster_to_map) for line in linestrings]
         linestrings = [line.simplify(self.config.get("tolerance", 0.1)) for line in linestrings]
 
         # TODO: this should be a function in geometrytools
