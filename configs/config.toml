@@ -27,8 +27,6 @@ inkscape_command="/Applications/Inkscape.app/Contents/MacOS/inkscape"
 [main]
 db_connection = "postgresql+psycopg://localhost:5432/lineworld"
 
-[layer.elevation]
-
 [layer.Contour]
 elevation_anchors = [0, 500, 2000, 9000]
 num_elevation_lines = 24
@@ -38,11 +36,9 @@ elevation_anchors = [0, -11000]
 num_elevation_lines = 15
 
 [layer.BathymetryFlowlines]
-num_tiles = 4
 line_distance = [0.4, 2.0]
-#line_distance = [2.0, 4.0]
-blur_density = true
-blur_density_kernel_size = 20
+blur_distance = true
+blur_distance_kernel_size = 20
 blur_angles = true
 blur_angles_kernel_size = 25
 blur_length = true

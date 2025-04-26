@@ -28,8 +28,6 @@ inkscape_command = "/Applications/Inkscape.app/Contents/MacOS/inkscape"
 [main]
 db_connection = "postgresql+psycopg://localhost:5432/lineworld"
 
-[layer.Elevation]
-
 [layer.Contour]
 elevation_anchors = [0, 500, 2000, 9000]
 num_elevation_lines = 9

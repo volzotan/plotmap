@@ -1,6 +1,6 @@
 # basic config
 
-name = "LineWorld2000x1400"
+name = "LineWorld2000x1200"
 
 debug = true
 projection = "VAN_DER_GRINTEN_I"
@@ -27,8 +27,6 @@ inkscape_command = "/Applications/Inkscape.app/Contents/MacOS/inkscape"
 
 [main]
 db_connection = "postgresql+psycopg://localhost:5432/lineworld"
-
-[layer.Elevation]
 
 [layer.Contour]
 elevation_anchors = [0, 500, 2000, 9000]

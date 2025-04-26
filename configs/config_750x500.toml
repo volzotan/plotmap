@@ -13,7 +13,7 @@ height = 500
 offset_x = 0.0
 offset_y = 50
 
-viewport_padding = [0, 0, 20, 0]
+viewport_padding = [0, 0, 0, 0]
 
 tolerance = 0.1
 tolerance_exclusion_zones = 0.5
@@ -23,8 +23,6 @@ inkscape_command = "/Applications/Inkscape.app/Contents/MacOS/inkscape"
 
 [main]
 db_connection = "postgresql+psycopg://localhost:5432/lineworld"
-
-[layer.Elevation]
 
 [layer.Contour]
 elevation_anchors = [0, 500, 2000, 9000]
@@ -46,12 +44,20 @@ hatching_distance = 1.0
 
 [layer.BathymetryFlowlines]
 layer_name = "BathymetryFlowlines"
-line_distance = [0.1, 2.0]
-line_max_length = [3, 15]
-blur_density_kernel_size = 10
-blur_angles_kernel_size = 5
+line_distance = [0.2, 2.0]
+line_max_length = [1.5, 15]
+blur_distance_kernel_size = 5
+blur_angles_kernel_size = 11
 blur_length_kernel_size = 5
-line_distance_end_factor = 0.25
+line_distance_end_factor = 0.75
+tolerance = 0.05
+
+[layer.OceanCurrents]
+layer_name = "OceanCurrents"
+line_distance = [0.6, 1.4]
+line_max_length = [200, 200]
+line_distance_end_factor = 0.5
+tolerance = 0.05
 
 [layer.Grid]
 latitude_line_dist = 20
@@ -59,16 +65,22 @@ longitude_line_dist = 20
 font_size = 5
 
 [layer.GridBathymetry]
-exclude_buffer_distance = 0.5
+exclude_buffer_distance = 1.0
 
 [layer.GridLabels]
-exclude_buffer_distance = 1.0
+exclude_buffer_distance = 1.5
 
 [layer.CitiesLabels]
-font_size = 5
+exclude_buffer_distance = 1.5
+font_size = 3.5
 circle_radius = 1.0
-offset_from_center = 10
+offset_from_center = 12
+box_safety_margin = 15
+max_iterations = 15000
+
+[layer.CitiesCircles]
+exclude_buffer_distance = 1.1
 
 [layer.Labels]
-font_size = 7
-exclude_buffer_distance = 1.0
+font_size = 6
+exclude_buffer_distance = 1.5
