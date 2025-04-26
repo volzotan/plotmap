@@ -3,6 +3,7 @@ import datetime
 import math
 import random
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,8 @@ class City:
     text: list[MultiLineString]
     region: int | None
     placement: int | None  # position index of the best label placement
+    debug_paths: list[LineString]
+    debug_boxes: list[Polygon]
 
 
 def _anneal(cities: list[City], region: list[int], config: dict[str, Any]):
@@ -105,9 +108,6 @@ def _anneal(cities: list[City], region: list[int], config: dict[str, Any]):
 def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str, Any]) -> list[City]:
     cities = []
 
-    debug_map_circles = []
-    debug_map_labels = []
-
     project_func = document_info.get_projection_func(Projection.WGS84)
     mat = document_info.get_transformation_matrix()
 
@@ -132,10 +132,13 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
             p = affine_transform(p, mat)
 
             circle = p.buffer(config.get("circle_radius", DEFAULT_CIRCLE_RADIUS))
-            debug_map_circles.append(circle)
 
             positions_boxes = []
             positions_text = []
+
+            debug_paths = []
+            debug_boxes = []
+
             for k in positions.keys():
                 sin = math.sin(math.radians(positions[k]["pos"]))
                 cos = math.cos(math.radians(positions[k]["pos"]))
@@ -173,7 +176,8 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                 box = lines.envelope.buffer(config.get("box_safety_margin", DEFAULT_BOX_SAFETY_MARGIN))
                 positions_boxes.append(box.envelope)
 
-                debug_map_labels += [box.exterior]
+                debug_paths.append(path)
+                debug_boxes += [box.exterior]
 
             cities.append(
                 City(
@@ -187,6 +191,8 @@ def read_from_file(filename: Path, document_info: DocumentInfo, config: dict[str
                     text=positions_text,
                     region=None,
                     placement=None,
+                    debug_paths=debug_paths,
+                    debug_boxes=debug_boxes
                 )
             )
 
@@ -278,11 +284,13 @@ def generate_placement(cities: list[City], config: dict[str, Any]) -> list[City]
 
 
 if __name__ == "__main__":
-    INPUT_FILE = Path("data/cities2/cities.csv")
+    INPUT_FILE = Path("data/cities/cities.csv")
     OUTPUT_PATH = Path("experiments/labelplacement/output")
 
     config = lineworld.get_config()
-    document_info = maptools.DocumentInfo(config)
+    document_info = map.DocumentInfo(config)
+
+    config["max_iterations"] = 1000
 
     cities = read_from_file(INPUT_FILE, document_info, config)
     cities = generate_placement(cities, config)
@@ -304,8 +312,16 @@ if __name__ == "__main__":
 
     # debug
 
-    # svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement_debug.svg"), DOCUMENT_SIZE)
-    # options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
-    # svg.add("circles", debug_map_circles, options=options)
-    # svg.add("labels", debug_map_labels, options=options)
-    # svg.write()
+    circles = [c.circle for c in cities]
+    boxes = [c.boxes[c.placement] for c in cities]
+    debug_boxes = [c.debug_boxes[c.placement] for c in cities]
+    debug_paths = list(chain.from_iterable([c.debug_paths for c in cities]))
+
+    svg = SvgWriter(Path(OUTPUT_PATH, "labelplacement_debug.svg"), document_info.get_document_size())
+    options = {"fill": "none", "stroke": "black", "stroke-width": "0.2"}
+    svg.add("circles", circles, options=options)
+    svg.add("boxes", boxes, options=options)
+    svg.add("debug_paths", debug_paths, options=options)
+    svg.add("debug_boxes", debug_boxes, options=options)
+    svg.add("labels", placed_labels, options=options)
+    svg.write()

@@ -192,8 +192,14 @@ class HersheyFont:
                     linestring = shapely.affinity.translate(linestring, xoff=g["anchor"][0])
                     output.append(linestring)
 
+
+        if align == Align.LEFT:
+            xoff = glyphs[0]["width"] * -0.3
+            output = [shapely.affinity.translate(ls, xoff=xoff) for ls in output]
+
         if center_vertical:
-            output = [shapely.affinity.translate(ls, yoff=(self.font_info["ascent"] * font_size) / 2) for ls in output]
+            yoff = (self.font_info["cap-height"] * font_size) / 2
+            output = [shapely.affinity.translate(ls, yoff=yoff) for ls in output]
 
         return output
 
@@ -308,6 +314,25 @@ if __name__ == "__main__":
             pt1 = [int(c) for c in pair[0]]
             pt2 = [int(c) for c in pair[1]]
             cv2.line(img, pt1, pt2, (0, 0, 0), 4)
+
+    path5 = shapely.affinity.translate(path1.segmentize(1), yoff=300)
+    linestrings_along_path5 = font.lines_for_text(
+        "m QUICK brown fox jumps", FONT_SIZE, path=path5, align=Align.CENTER, center_vertical=True, reverse_path=True
+    )
+
+    for pair in _linestring_to_coordinate_pairs(path5):
+        pt1 = [int(c) for c in pair[0]]
+        pt2 = [int(c) for c in pair[1]]
+        cv2.line(img, pt1, pt2, (0, 0, 255), 2)
+
+    for linestring in linestrings_along_path5:
+        for pair in _linestring_to_coordinate_pairs(linestring):
+            pt1 = [int(c) for c in pair[0]]
+            pt2 = [int(c) for c in pair[1]]
+            cv2.line(img, pt1, pt2, (0, 0, 0), 4)
+
+
+
 
     linestrings = [
         shapely.affinity.translate(l, yoff=+CANVAS_DIMENSIONS[1] * 0.75) for l in font.lines_for_text(TEXT, FONT_SIZE)

@@ -7,9 +7,9 @@ from typing import Any
 import geoalchemy2
 import numpy as np
 import shapely
-from core.map import DocumentInfo, Projection
+from lineworld.core.map import DocumentInfo, Projection
 from geoalchemy2.shape import from_shape, to_shape
-from layers.layer import Layer
+from lineworld.layers.layer import Layer
 from loguru import logger
 from shapely import Polygon, MultiLineString, LineString, Point
 from shapely.affinity import affine_transform
