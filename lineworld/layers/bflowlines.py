@@ -166,7 +166,11 @@ class BathymetryFlowlines(Layer):
         with rasterio.open(self.elevation_file) as dataset:
             elevation = dataset.read(1)
 
-        elevation = cv2.resize(elevation, [document_info.width, document_info.width])  # TODO
+        pixel_per_mm = 4
+        elevation = cv2.resize(
+            elevation,
+            [int(document_info.width * pixel_per_mm), int(document_info.width * pixel_per_mm)]
+        )  # TODO
 
         density = None
         try:
@@ -177,8 +181,7 @@ class BathymetryFlowlines(Layer):
 
             # 50:50 blend of elevation data and externally computed density image
             elevation_normalized = normalize_to_uint8(elevation)
-            # density = np.mean(np.dstack([density, elevation_normalized]), axis=2).astype(np.uint8)
-
+            density = np.mean(np.dstack([density, elevation_normalized]), axis=2).astype(np.uint8)
 
         except Exception as e:
             logger.error(e)
@@ -190,7 +193,7 @@ class BathymetryFlowlines(Layer):
 
         _, _, _, _, angles, inclination = get_slope(elevation, 1)
 
-        WINDOW_SIZE = 25
+        WINDOW_SIZE = 7
         MAX_WIN_VAR = 40000
         win_mean = ndimage.uniform_filter(elevation.astype(float), (WINDOW_SIZE, WINDOW_SIZE))
         win_sqr_mean = ndimage.uniform_filter(elevation.astype(float) ** 2, (WINDOW_SIZE, WINDOW_SIZE))
@@ -198,6 +201,9 @@ class BathymetryFlowlines(Layer):
         win_var = np.clip(win_var, 0, MAX_WIN_VAR)
         win_var = win_var * -1 + MAX_WIN_VAR
         win_var = (np.iinfo(np.uint8).max * ((win_var - np.min(win_var)) / np.ptp(win_var))).astype(np.uint8)
+
+        # cv2.imwrite("win_var.png", win_var)
+        # exit()
 
         # uint8 image must be centered around 128 to deal with negative values
         mapping_angle = ((angles + math.pi) / math.tau * 255.0).astype(np.uint8)
