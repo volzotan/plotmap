@@ -13,14 +13,22 @@ and [OpenStreetMap coastlines](https://osmdata.openstreetmap.de/data/coastlines.
 * Postgres including postGIS
 * Python >= 3.12
 * ~30 GB of disk space
+* psycopg requires libpq
 
 ### Run
 
-Build a map with a rather small config file:   
+1) Create a new postgres database and enable postGIS.
+
+2) Enter the database URI to the config file `configs/config.toml`
+
+3) Download the Hershey font file:
+`curl https://gitlab.com/oskay/svg-fonts/-/raw/master/fonts/Hershey/HersheySans1.svg --create-dirs -o fonts/HersheySans1.svg` 
+
+3) Build a map with a rather small config file:   
 ```python3 lineworld/run.py```  
 This may take a while to download the GEBCO elevation data. 
 
-Convert the output SVG to gcode files, layer by layer:  
+4) Convert the output SVG to gcode files, layer by layer:  
 ```python3 svgtogcode.py Lineworld750x500.svg```
 
 ### Learn more:
