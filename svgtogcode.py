@@ -15,9 +15,6 @@ DEFAULT_MAX_LENGTH_SEGMENT = 50  # in m
 
 OFFSET = [0, 0]
 
-# Rotate by 90 degrees
-ROTATE_90 = False
-
 TRAVEL_SPEED = 6000
 WRITE_SPEED = 3000
 PEN_LIFT_SPEED = 5000
@@ -184,6 +181,8 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=0, help="process only the first n lines")
 
     parser.add_argument("--dip-mode", default=False, action="store_true", help="enable dip pen mode")
+
+    parser.add_argument("--rotate90", default=False, action="store_true", help="rotate by 90 degrees")
 
     args = parser.parse_args()
 
@@ -583,7 +582,7 @@ if __name__ == "__main__":
                     line_next = segment[i + 1]
 
                 line_start = [line[0] + OFFSET[0], line[1] + OFFSET[1]]
-                if ROTATE_90:
+                if args.rotate90:
                     line_start = [
                         line[1] + OFFSET[1],
                         (line[0] + OFFSET[0]) * -1 + size[0],
@@ -601,7 +600,7 @@ if __name__ == "__main__":
                     count_pen_down += 1
 
                 line_end = line[2] + OFFSET[0], line[3] + OFFSET[1]
-                if ROTATE_90:
+                if args.rotate90:
                     line_end = line[3] + OFFSET[1], (line[2] + OFFSET[0]) * -1 + size[0]
 
                 out.write(CMD_MOVE.format(*line_end))

@@ -12,7 +12,18 @@ from core import map
 from layers import contour
 from lineworld.core.map import DocumentInfo
 from lineworld.core.svgwriter import SvgWriter
-from lineworld.layers import coastlines, grid, labels, cities, bflowlines, bathymetry, cities, contour2, meta
+from lineworld.layers import (
+    coastlines,
+    grid,
+    labels,
+    cities,
+    bflowlines,
+    bathymetry,
+    cities,
+    contour2,
+    meta,
+    oceancurrents,
+)
 from lineworld.util.export import convert_svg_to_png
 
 
@@ -40,6 +51,11 @@ def run() -> None:
         "BathymetryFlowlines", engine, config, tile_boundaries=layer_grid_bathymetry.get_polygons(document_info)
     )
     layer_bathymetry2 = bathymetry.Bathymetry("Bathymetry", engine, config)
+
+    layer_oceancurrents = oceancurrents.OceanCurrents(
+        "OceanCurrents", engine, config, tile_boundaries=layer_grid_bathymetry.get_polygons(document_info)
+    )
+
     layer_contour = contour.Contour("Contour", engine, config)
     layer_contour2 = contour2.Contour2("Contour2", engine, config)
 
@@ -52,8 +68,10 @@ def run() -> None:
     layer_meta = meta.Meta("Meta", engine, config)
 
     compute_layers = [
-        layer_bathymetry,
-        layer_contour2,
+        # layer_oceancurrents,
+        # layer_bathymetry,
+        # # layer_bathymetry2,
+        # layer_contour2,
         # layer_coastlines,
         # layer_cities_labels,
         # layer_cities_circles,
@@ -97,16 +115,17 @@ def run() -> None:
 
     visible_layers = [
         # layer_meta,
-        layer_cities_labels,
         layer_cities_circles,
+        layer_cities_labels,
         layer_grid_labels,
         layer_labels,
         layer_coastlines,
         layer_contour2,
-        # layer_contour,
+        # # layer_contour,
         layer_grid_bathymetry,
         layer_bathymetry,
         # layer_bathymetry2,
+        # layer_oceancurrents,
     ]
 
     exclude = []
@@ -157,6 +176,13 @@ def run() -> None:
 
     layer_styles = {}
 
+    layer_styles[layer_oceancurrents.layer_id] = {
+        "fill": "none",
+        "stroke": "blue",
+        "stroke-width": "0.40",
+        "fill-opacity": "0.1",
+    }
+
     layer_styles[layer_bathymetry.layer_id] = {
         "fill": "none",
         "stroke": "blue",
@@ -179,7 +205,7 @@ def run() -> None:
     layer_styles[layer_grid_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "1.0",
+        "stroke-width": "0.4",
     }
 
     layer_styles[layer_labels.layer_id] = {
@@ -191,19 +217,19 @@ def run() -> None:
     layer_styles[layer_cities_labels.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "0.5",
+        "stroke-width": "0.4",
     }
 
     layer_styles[layer_cities_circles.layer_id] = {
         "fill": "none",
         "stroke": "red",
-        "stroke-width": "0.5",
+        "stroke-width": "0.4",
     }
 
     layer_styles[layer_meta.layer_id] = {
         "fill": "none",
         "stroke": "black",
-        "stroke-width": "0.5",
+        "stroke-width": "0.4",
     }
 
     layer_styles[layer_bathymetry2.layer_id] = layer_styles[layer_bathymetry.layer_id]
