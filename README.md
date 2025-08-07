@@ -5,6 +5,8 @@ and [OpenStreetMap coastlines](https://osmdata.openstreetmap.de/data/coastlines.
 
 ![header](media/header.png)
 
+== This project is still work in progress and does not yet work out of the box ==
+
 ### Prerequisites
 
 * Postgres including postGIS
