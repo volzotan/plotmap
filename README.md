@@ -3,9 +3,10 @@
 Create vector line (world) maps suitable for pen plotters. Data sources include [GEBCO](https://www.gebco.net/) elevation data 
 and [OpenStreetMap coastlines](https://osmdata.openstreetmap.de/data/coastlines.html).
 
-![header](media/header.png)
+> [!WARNING]
+> This project is still work in progress and does not yet work out of the box
 
-== This project is still work in progress and does not yet work out of the box ==
+![header](media/header.png)
 
 ### Prerequisites
 
